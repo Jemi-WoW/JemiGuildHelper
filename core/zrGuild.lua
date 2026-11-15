@@ -38,10 +38,13 @@ function ZR.RefreshRoster()
   for i = 1, total do
     local name, rank, _, level, _, _, _, _, online, _, classFile = GetGuildRosterInfo(i)
     if name and not ZR.IsSecret(name) then
-      local info = { online = online and true or false, classFile = classFile }
+      -- Combat can hide these; unknown must not read as offline.
+      local known = not ZR.IsSecret(online)
+      local info = { classFile = not ZR.IsSecret(classFile) and classFile or nil }
+      if known then info.online = online and true or false end
       if not ZR.IsSecret(rank) and type(rank) == "string" then info.rank = rank end
       if not ZR.IsSecret(level) and type(level) == "number" then info.level = level end
-      if not online and GetGuildRosterLastOnline then
+      if known and not online and GetGuildRosterLastOnline then
         local y, mo, d, h = GetGuildRosterLastOnline(i)
         if y then info.away = (((y * 365 + mo * 30 + d) * 24) + h) * 3600 end
       end

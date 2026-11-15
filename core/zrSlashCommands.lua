@@ -12,6 +12,7 @@ local function PrintHelp()
   ZR.Msg("  |cffffd100/zr minimap|r - show or hide the minimap icon")
   ZR.Msg("  |cffffd100/zr map on|r or |cffffd100off|r - guild members on the world map")
   ZR.Msg("  |cffffd100/zr map share on|r or |cffffd100off|r - share your own position with the guild")
+  ZR.Msg("  |cffffd100/zr map minimap on|r or |cffffd100off|r - guild members on the minimap")
   ZR.Msg("  |cffffd100/zr invite chat|r or |cffffd100copy|r - how Invite hands you /ginvite")
   ZR.Msg("  |cffffd100/zr sync on|r or |cffffd100off|r - share contacts with other officers")
   ZR.Msg("  |cffffd100/zr days <n>|r - hide contacted players for n days (now " .. (ZR.DB().hideDays or 3) .. ")")
@@ -55,13 +56,20 @@ SlashCmdList["ZUGZUGREBORN"] = function(msg)
   end
 
   if cmd == "map" then
-    local share, value = arg:match("^(share)%s*(%a*)$")
-    value = value or arg
+    local which, value = arg:match("^(%a+)%s+(%a+)$")
+    if not which then value = arg end
     if value == "on" or value == "off" then
-      if share then ZR.Map.SetSharing(value == "on") else ZR.Map.SetShowing(value == "on") end
+      local on = value == "on"
+      if which == "share" then
+        ZR.Map.SetSharing(on)
+      elseif which == "minimap" then
+        ZR.Map.SetMinimap(on)
+      elseif not which then
+        ZR.Map.SetShowing(on)
+      end
     end
-    ZR.Msg(("Guild members on the map: %s. Sharing your position: %s."):format(
-      ZR.Map.Showing() and "on" or "off", ZR.Map.Sharing() and "on" or "off"))
+    ZR.Msg(("Guild members on the map: %s. On the minimap: %s. Sharing your position: %s."):format(
+      ZR.Map.Showing() and "on" or "off", ZR.Map.MinimapShowing() and "on" or "off", ZR.Map.Sharing() and "on" or "off"))
     return
   end
 

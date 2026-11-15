@@ -9,24 +9,30 @@ local MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 local TAXI = { Horde = 132268, Alliance = 132239 }
 local FALLBACK = { r = 0.2, g = 1, b = 0.4 }
 local CLUSTER = { r = 1, g = 0.82, b = 0 }
+local BADGE = 10
+local LIFT = 16
+local ROW = 5
+local MAX_INSIDE = 10
+local SKULL = "Interface\\TargetingFrame\\UI-TargetingFrame-Skull"
+local MINI = 12
+local PULSE = 4
+local FOCUS_WAIT = 60
+-- Minimap view diameters in yards per zoom level, for clients without C_Minimap.GetViewRadius.
+local MINIMAP_YARDS = {
+  outdoor = { [0] = 466 + 2 / 3, 400, 333 + 1 / 3, 266 + 2 / 3, 200, 133 + 1 / 3 },
+  indoor = { [0] = 300, 240, 180, 120, 80, 50 },
+}
 
-local pins, rects = {}, {}
-local dirty = true
+local pins, rects, miniPins = {}, {}, {}
+local dirty, gliding = true, false
+local focus, pulse
 local seen = {}
-local setUp, wasShowing
+local setUp, button
 
--- MapUtils skips drawing its guild dots while a hook says hidden, but keeps sharing.
+-- MapUtils members show as our pins, so its own dots stay hidden even while ours are toggled off.
 local hooks = _G.D4GuildMapHooks or {}
 _G.D4GuildMapHooks = hooks
-hooks.ZUGZUGReborn = { isHidden = function() return Map.Showing() end }
-
--- Only on a toggle, so MapUtils redraws once instead of on every position.
-local function RefreshMapUtils()
-  local showing = Map.Showing()
-  if showing == wasShowing then return end
-  wasShowing = showing
-  for _, guild in pairs(_G.D4GuildMapInstances or {}) do guild.dirty = true end
-end
+hooks.ZUGZUGReborn = { isHidden = function() return true end }
 
 local function Rect(from, to)
   local key = from * 100000 + to
@@ -94,13 +100,18 @@ local function MemberTooltip(pin, m)
   if level and level > 0 then bits[#bits + 1] = (LEVEL or "Level") .. " " .. level end
   if #bits > 0 then GameTooltip:AddLine(table.concat(bits, ", "), 1, 1, 1) end
   local mapInfo = C_Map.GetMapInfo(m.mapID)
-  if mapInfo and mapInfo.name then GameTooltip:AddLine(mapInfo.name, 0.7, 0.7, 0.7) end
+  if m.instance then
+    GameTooltip:AddLine("In " .. (m.instance.name ~= "" and m.instance.name or (m.instance.raid and "a raid" or "a dungeon")), 0.6, 0.8, 1)
+    if mapInfo and mapInfo.name then GameTooltip:AddLine("Entrance in " .. mapInfo.name, 0.7, 0.7, 0.7) end
+  elseif mapInfo and mapInfo.name then
+    GameTooltip:AddLine(mapInfo.name, 0.7, 0.7, 0.7)
+  end
   if m.taxi then GameTooltip:AddLine("On a flight path", 1, 0.82, 0) end
   AddProfessions(m.name)
   GameTooltip:AddLine(" ")
   GameTooltip:AddLine(("Updated %ds ago%s"):format(math.max(0, math.floor(GetTime() - m.at)),
     m.source == "MapUtils" and ", shared by MapUtils" or ""), 0.5, 0.5, 0.5)
-  GameTooltip:AddLine("Click to whisper, Shift-click for a waypoint, right-click for more.", 0.6, 0.6, 0.6, true)
+  GameTooltip:AddLine("Right-click for more, Shift-click for a waypoint.", 0.6, 0.6, 0.6, true)
   GameTooltip:Show()
 end
 
@@ -109,10 +120,11 @@ local function ClusterTooltip(pin, list)
   GameTooltip_SetTitle(GameTooltip, #list .. " guild members")
   for _, m in ipairs(list) do
     local mapInfo = C_Map.GetMapInfo(m.mapID)
-    GameTooltip:AddDoubleLine(ZR.ColorName(m.name, ClassOf(m)), mapInfo and mapInfo.name or "", 1, 1, 1, 0.7, 0.7, 0.7)
+    local where = (m.instance and m.instance.name ~= "" and m.instance.name) or (mapInfo and mapInfo.name) or ""
+    GameTooltip:AddDoubleLine(ZR.ColorName(m.name, ClassOf(m)), where, 1, 1, 1, 0.7, 0.7, 0.7)
   end
   GameTooltip:AddLine(" ")
-  GameTooltip:AddLine("Click to pick who to whisper.", 0.6, 0.6, 0.6)
+  GameTooltip:AddLine("Right-click to pick who to whisper.", 0.6, 0.6, 0.6)
   GameTooltip:Show()
 end
 
@@ -130,15 +142,13 @@ local function ClusterMenu(pin)
   end)
 end
 
+-- Plain left-click does nothing, so clicking around the map never opens a whisper by accident.
 local function PinClick(pin, button)
-  if #pin.list > 1 then return ClusterMenu(pin) end
-  local m = pin.list[1]
   if button == "RightButton" then
-    UI.NameMenu(pin, m.name, ClassOf(m))
-  elseif IsShiftKeyDown() then
-    Waypoint(m)
-  else
-    UI.Whisper(m.name)
+    if #pin.list > 1 then return ClusterMenu(pin) end
+    UI.NameMenu(pin, pin.list[1].name, ClassOf(pin.list[1]), true)
+  elseif IsShiftKeyDown() and #pin.list == 1 then
+    Waypoint(pin.list[1])
   end
 end
 
@@ -158,6 +168,7 @@ local function CreatePin(canvas)
   pin.Icon:AddMaskTexture(pin.Mask)
   pin.Count = pin:CreateFontString(nil, "OVERLAY")
   pin.Count:SetPoint("CENTER")
+  pin.Badge = pin:CreateTexture(nil, "OVERLAY", nil, 1)
   pin:SetScript("OnEnter", PinEnter)
   pin:SetScript("OnLeave", GameTooltip_Hide)
   pin:SetScript("OnHide", function(self) if GameTooltip:IsOwned(self) then GameTooltip:Hide() end end)
@@ -165,11 +176,29 @@ local function CreatePin(canvas)
   return pin
 end
 
+local function SetBadge(pin, instance, scale)
+  if not instance then
+    pin.Badge:Hide()
+    return
+  end
+  local atlas = instance.raid and "Raid" or "Dungeon"
+  if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+    pin.Badge:SetAtlas(atlas)
+  else
+    pin.Badge:SetTexture(SKULL)
+  end
+  pin.Badge:SetSize(BADGE / scale, BADGE / scale)
+  pin.Badge:ClearAllPoints()
+  pin.Badge:SetPoint("CENTER", pin, "BOTTOMRIGHT", -2 / scale, 2 / scale)
+  pin.Badge:Show()
+end
+
 -- Sized against the canvas scale so pins look the same at every zoom.
 local function SetupPin(pin, list, scale)
   pin.list = list
   local size, ring = SIZE / scale, RING / scale
   pin:SetSize(size, size)
+  SetBadge(pin, list[1].instance, scale)
   -- A dark edge keeps yellow and white class colors visible on the map.
   pin.Shadow:ClearAllPoints()
   pin.Shadow:SetPoint("TOPLEFT", -1 / scale, 1 / scale)
@@ -201,15 +230,23 @@ local function SetupPin(pin, list, scale)
   end
 end
 
+local pinLevel
+
+-- Read in combat too: it only reads, and the canvas fallback sits under the map art.
 local function PinLevel(canvas)
-  if not InCombatLockdown() and WorldMapFrame.GetPinFrameLevelsManager then
-    local manager = WorldMapFrame:GetPinFrameLevelsManager()
-    if manager and manager.GetValidFrameLevel then
-      local ok, level = pcall(manager.GetValidFrameLevel, manager, "PIN_FRAME_LEVEL_GROUP_MEMBER")
-      if ok and level then return level end
-    end
+  local manager = WorldMapFrame.GetPinFrameLevelsManager and WorldMapFrame:GetPinFrameLevelsManager()
+  if manager and manager.GetValidFrameLevel then
+    local ok, level = pcall(manager.GetValidFrameLevel, manager, "PIN_FRAME_LEVEL_GROUP_MEMBER")
+    if ok and type(level) == "number" then pinLevel = level end
   end
-  return canvas:GetFrameLevel() + 30
+  return pinLevel or canvas:GetFrameLevel() + 30
+end
+
+-- Combat can hide group membership; an extra pin beats an error that draws none.
+local function InGroup(name)
+  local party, raid = UnitInParty(name), UnitInRaid(name)
+  if ZR.IsSecret(party) or ZR.IsSecret(raid) then return false end
+  return (party or raid) and true or false
 end
 
 -- Nearby members share one pin, so a busy town stays readable.
@@ -234,26 +271,101 @@ local function Cluster(points, size)
   return groups
 end
 
+-- Members in one dungeon line up above its entrance, closest row first, instead of merging into one pin.
+local function InsideSlots(group, scale, out)
+  local list = group.list
+  table.sort(list, function(a, b) return a.name < b.name end)
+  local items = {}
+  for i = 1, math.min(#list, MAX_INSIDE) do items[i] = { list[i] } end
+  if #list > MAX_INSIDE then
+    local rest = {}
+    for i = MAX_INSIDE, #list do rest[#rest + 1] = list[i] end
+    items[MAX_INSIDE] = rest
+  end
+  local ex, ey = group.x / #list, group.y / #list
+  local step, lift = (SIZE + 2) / scale, LIFT / scale
+  for i, item in ipairs(items) do
+    local row = math.floor((i - 1) / ROW)
+    local inRow = math.min(ROW, #items - row * ROW)
+    local col = (i - 1) % ROW
+    out[#out + 1] = { list = item, x = ex + (col - (inRow - 1) / 2) * step, y = ey - lift - row * step }
+  end
+end
+
+local function Pulse(canvas)
+  if pulse then return pulse end
+  pulse = CreateFrame("Frame", nil, canvas)
+  pulse.Glow = pulse:CreateTexture(nil, "BACKGROUND")
+  pulse.Glow:SetPoint("CENTER")
+  pulse.Glow:SetTexture(MASK)
+  pulse.Glow:SetVertexColor(CLUSTER.r, CLUSTER.g, CLUSTER.b)
+  pulse.Glow:SetBlendMode("ADD")
+  pulse:SetScript("OnUpdate", function(self)
+    local age = focus and focus.start and GetTime() - focus.start
+    if not age or age > PULSE then
+      if age then focus = nil end
+      self:Hide()
+      return
+    end
+    local t = age % 1
+    self.Glow:SetSize(self.base * (1 + 1.5 * t), self.base * (1 + 1.5 * t))
+    self.Glow:SetAlpha(0.9 * (1 - t))
+  end)
+  return pulse
+end
+
+-- Rings the member picked with Show on map for a few seconds, once their pin is on screen.
+local function PlacePulse(canvas, found, scale, level)
+  if not focus or not found then
+    if pulse then pulse:Hide() end
+    return
+  end
+  focus.start = focus.start or GetTime()
+  local p = Pulse(canvas)
+  p.base = SIZE / scale
+  p:SetSize(p.base, p.base)
+  p:SetFrameLevel(math.max(level - 1, 0))
+  p:ClearAllPoints()
+  p:SetPoint("CENTER", found)
+  p:Show()
+end
+
 local function Draw()
   dirty = false
+  gliding = false
   local canvas = WorldMapFrame:GetCanvas()
   local mapID = WorldMapFrame:GetMapID()
   local count = 0
+  local found
+  local now = GetTime()
+  if focus and not focus.start and now - focus.at > FOCUS_WAIT then focus = nil end
   local scale = canvas and canvas:GetScale()
   local width, height = canvas and canvas:GetWidth() or 0, canvas and canvas:GetHeight() or 0
   if mapID and Map.Showing() and scale and scale > 0 and width > 0 and height > 0 then
-    local points = {}
+    local points, inside = {}, {}
     for name, m in pairs(Map.Active()) do
-      -- Blizzard already draws party and raid members.
-      if not UnitInParty(name) and not UnitInRaid(name) then
-        local x, y = Project(m.mapID, mapID, m.x, m.y)
+      -- Blizzard already draws party and raid members, but not ones inside a dungeon.
+      if m.instance or not InGroup(name) then
+        local px, py, moving = Map.Position(m, now)
+        gliding = gliding or moving
+        local x, y = Project(m.mapID, mapID, px, py)
         if x and x >= 0 and x <= 1 and y >= 0 and y <= 1 then
-          points[#points + 1] = { m = m, x = width * x, y = height * y }
+          x, y = width * x, height * y
+          if m.instance then
+            local g = inside[m.instance.id] or { list = {}, x = 0, y = 0 }
+            inside[m.instance.id] = g
+            g.list[#g.list + 1] = m
+            g.x, g.y = g.x + x, g.y + y
+          else
+            points[#points + 1] = { m = m, x = x, y = y }
+          end
         end
       end
     end
+    local slots = Cluster(points, SIZE / scale)
+    for _, g in pairs(inside) do InsideSlots(g, scale, slots) end
     local level = PinLevel(canvas)
-    for _, g in ipairs(Cluster(points, SIZE / scale)) do
+    for _, g in ipairs(slots) do
       count = count + 1
       local pin = pins[count]
       if not pin then
@@ -265,20 +377,161 @@ local function Draw()
       pin:ClearAllPoints()
       pin:SetPoint("CENTER", canvas, "TOPLEFT", g.x, -g.y)
       pin:Show()
+      if focus then
+        for _, m in ipairs(g.list) do
+          if m.name == focus.name then found = pin end
+        end
+      end
     end
+    PlacePulse(canvas, found, scale, level)
   end
   for i = count + 1, #pins do pins[i]:Hide() end
 end
 
+function UI.ShowOnMap(name)
+  local m = Map.Get(name)
+  if not m then
+    ZR.Msg(name .. " isn't on the map right now.")
+    return
+  end
+  if not Map.Showing() then Map.SetShowing(true) end
+  focus = { name = name, at = GetTime() }
+  dirty = true
+  if WorldMapFrame:IsShown() then
+    WorldMapFrame:SetMapID(m.mapID)
+  elseif InCombatLockdown() then
+    -- Opening the map from an addon is blocked in combat, so it waits for the player to open it.
+    ZR.Msg("Open your map to see " .. name .. ".")
+  else
+    OpenWorldMap(m.mapID)
+  end
+end
+
+local function OnMapShown()
+  dirty = true
+  local m = focus and not focus.start and Map.Get(focus.name)
+  if m and WorldMapFrame:GetMapID() ~= m.mapID then WorldMapFrame:SetMapID(m.mapID) end
+end
+
+-- The guild roster and chat name menus get Show on map too, for members with a position.
+if Menu and Menu.ModifyMenu then
+  for _, tag in ipairs({ "MENU_UNIT_COMMUNITIES_GUILD_MEMBER", "MENU_UNIT_GUILD", "MENU_UNIT_FRIEND" }) do
+    Menu.ModifyMenu(tag, function(_, root, data)
+      local name = data and data.name
+      if type(name) ~= "string" or ZR.IsSecret(name) then return end
+      name = ZR.StripRealm(name)
+      if not Map.Get(name) then return end
+      root:CreateDivider()
+      root:CreateButton("Show on map", function() UI.ShowOnMap(name) end)
+    end)
+  end
+end
+
 local function OnUpdate(self, elapsed)
   self.elapsed = (self.elapsed or 0) + elapsed
-  if self.elapsed < 0.1 then return end
+  if self.elapsed < (gliding and 0.03 or 0.1) then return end
   self.elapsed = 0
   local canvas = WorldMapFrame:GetCanvas()
   local mapID, scale, width = WorldMapFrame:GetMapID(), canvas:GetScale(), canvas:GetWidth()
-  if not dirty and seen.mapID == mapID and seen.scale == scale and seen.width == width then return end
+  if not dirty and not gliding and seen.mapID == mapID and seen.scale == scale and seen.width == width then return end
   seen.mapID, seen.scale, seen.width = mapID, scale, width
   Draw()
+end
+
+local function UpdateButton()
+  if not button then return end
+  local on = Map.Showing()
+  button.Icon:SetDesaturated(not on)
+  button.Icon:SetAlpha(on and 1 or 0.4)
+  button.Background:SetAlpha(on and 1 or 0.4)
+end
+
+local function ButtonTooltip(self)
+  local on = Map.Showing()
+  GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+  GameTooltip_SetTitle(GameTooltip, ZR.TITLE)
+  GameTooltip:AddDoubleLine("Guild members", on and "Shown" or "Hidden", 1, 1, 1,
+    on and 0.2 or 1, on and 1 or 0.3, on and 0.2 or 0.3)
+  GameTooltip:AddLine(on and "Click to hide them." or "Click to show them.", 0.6, 0.6, 0.6)
+  if Map.Sharing() then GameTooltip:AddLine("Guild members still see you either way.", 0.6, 0.6, 0.6) end
+  GameTooltip:Show()
+end
+
+local function ButtonClick(self)
+  local on = not Map.Showing()
+  PlaySound(on and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+  Map.SetShowing(on)
+  ButtonTooltip(self)
+end
+
+local function StyleButton(b)
+  b:SetSize(32, 32)
+  b:SetFrameStrata("HIGH")
+  b.Background = b:CreateTexture(nil, "BACKGROUND")
+  b.Background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+  b.Background:SetSize(24, 24)
+  b.Background:SetPoint("CENTER")
+  b.Icon = b:CreateTexture(nil, "ARTWORK")
+  b.Icon:SetTexture(ZR.ICON_TEXTURE)
+  b.Icon:SetSize(20, 20)
+  b.Icon:SetPoint("CENTER")
+  b.Icon:SetMask(MASK)
+  b.Border = b:CreateTexture(nil, "OVERLAY")
+  b.Border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  b.Border:SetSize(54, 54)
+  b.Border:SetPoint("TOPLEFT")
+  b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
+  b:SetScript("OnMouseDown", function(self) self.Icon:SetPoint("CENTER", 1, -1) end)
+  b:SetScript("OnMouseUp", function(self) self.Icon:SetPoint("CENTER") end)
+  b:SetScript("OnClick", ButtonClick)
+  b:SetScript("OnEnter", ButtonTooltip)
+  b:SetScript("OnLeave", GameTooltip_Hide)
+  b.Refresh = UpdateButton
+end
+
+local function Container()
+  return WorldMapFrame.GetCanvasContainer and WorldMapFrame:GetCanvasContainer() or WorldMapFrame.ScrollContainer
+end
+
+-- Without the shared button library, take the first free slot in the column other addons stack down the left edge.
+local function PlaceButton()
+  local box = Container()
+  local left, top = box:GetLeft(), box:GetTop()
+  if not left or not top then return end
+  local taken = {}
+  for _, parent in ipairs({ WorldMapFrame, box, WorldMapFrame.BorderFrame }) do
+    for _, f in ipairs({ parent:GetChildren() }) do
+      if f ~= button and f:IsShown() then
+        local l, t, w, h = f:GetLeft(), f:GetTop(), f:GetWidth(), f:GetHeight()
+        if l and t and w >= 16 and w <= 48 and h >= 16 and h <= 48 and math.abs(l - left) < 40 then
+          local slot = math.floor((top - t) / 32 + 0.5)
+          if slot >= 0 then taken[slot] = true end
+        end
+      end
+    end
+  end
+  local slot = 0
+  while taken[slot] do slot = slot + 1 end
+  button:ClearAllPoints()
+  button:SetPoint("TOPLEFT", box, "TOPLEFT", 3, -32 * slot)
+end
+
+-- Made on first open, once every other addon has loaded its buttons.
+local function CreateButton()
+  if button then return end
+  local lib = LibStub and LibStub("Krowi_WorldMapButtons-1.4", true)
+  if lib then
+    button = lib:Add(nil, "Button")
+    StyleButton(button)
+  else
+    button = CreateFrame("Button", "ZUGZUGRebornMapButton", WorldMapFrame)
+    StyleButton(button)
+    -- Other addons place theirs when the map opens, so wait for them.
+    WorldMapFrame:HookScript("OnShow", function() C_Timer.After(0, PlaceButton) end)
+    Container():HookScript("OnSizeChanged", PlaceButton)
+    C_Timer.After(0, PlaceButton)
+  end
+  UpdateButton()
 end
 
 local function Setup()
@@ -286,15 +539,103 @@ local function Setup()
   setUp = true
   local updater = CreateFrame("Frame", nil, WorldMapFrame)
   updater:SetScript("OnUpdate", OnUpdate)
-  WorldMapFrame:HookScript("OnShow", function() dirty = true end)
+  WorldMapFrame:HookScript("OnShow", function()
+    OnMapShown()
+    CreateButton()
+  end)
+end
+
+local function MinimapRadius()
+  if C_Minimap and C_Minimap.GetViewRadius then
+    local ok, yards = pcall(C_Minimap.GetViewRadius)
+    if ok and type(yards) == "number" and yards > 0 then return yards end
+  end
+  local sizes = MINIMAP_YARDS[IsIndoors() and "indoor" or "outdoor"]
+  return (sizes[Minimap:GetZoom()] or sizes[0]) / 2
+end
+
+local vec = CreateVector2D and CreateVector2D(0, 0)
+
+-- World yards, which work across zone borders: x points north, y points west.
+local function WorldPos(mapID, x, y)
+  if not vec or not C_Map.GetWorldPosFromMapPos then return end
+  vec:SetXY(x, y)
+  local ok, continent, pos = pcall(C_Map.GetWorldPosFromMapPos, mapID, vec)
+  if ok and continent and pos then return continent, pos.x, pos.y end
+end
+
+local function MemberWorld(m, x, y)
+  if m.worldX ~= x or m.worldY ~= y then
+    m.worldX, m.worldY = x, y
+    m.continent, m.north, m.west = WorldPos(m.mapID, x, y)
+  end
+  return m.continent, m.north, m.west
+end
+
+local function DrawMinimap()
+  local count = 0
+  local mapID, x, y = Map.OwnPosition()
+  local continent, north, west
+  if mapID and Map.Showing() and Map.MinimapShowing() then continent, north, west = WorldPos(mapID, x, y) end
+  if continent then
+    local half = Minimap:GetWidth() / 2
+    local perYard = half / MinimapRadius()
+    local edge = half - MINI / 2
+    local round = not GetMinimapShape or GetMinimapShape() == "ROUND"
+    local facing = GetCVar("rotateMinimap") == "1" and GetPlayerFacing()
+    if ZR.IsSecret(facing) then facing = nil end
+    local sin, cos = math.sin(facing or 0), math.cos(facing or 0)
+    local now, level = GetTime(), Minimap:GetFrameLevel() + 5
+    for name, m in pairs(Map.Active()) do
+      -- Dungeon members only stand at the entrance on paper, and Blizzard draws group members.
+      if not m.instance and not InGroup(name) then
+        local c, n, w = MemberWorld(m, Map.Position(m, now))
+        if c == continent then
+          local east, up = (west - w) * perYard, (n - north) * perYard
+          local sx, sy = east * cos + up * sin, -east * sin + up * cos
+          local shown = round and sx * sx + sy * sy <= edge * edge or not round and math.abs(sx) <= edge and math.abs(sy) <= edge
+          if shown then
+            count = count + 1
+            local pin = miniPins[count]
+            if not pin then
+              pin = CreatePin(Minimap)
+              miniPins[count] = pin
+            end
+            if pin:GetFrameLevel() ~= level then pin:SetFrameLevel(level) end
+            pin.one = pin.one or {}
+            pin.one[1] = m
+            SetupPin(pin, pin.one, SIZE / MINI)
+            pin:ClearAllPoints()
+            pin:SetPoint("CENTER", Minimap, "CENTER", sx, sy)
+            pin:Show()
+          end
+        end
+      end
+    end
+  end
+  for i = count + 1, #miniPins do miniPins[i]:Hide() end
+end
+
+local function SetupMinimap()
+  if not Minimap or not C_Map.GetWorldPosFromMapPos then return end
+  local updater = CreateFrame("Frame", nil, Minimap)
+  updater:SetScript("OnUpdate", function(self, elapsed)
+    self.elapsed = (self.elapsed or 0) + elapsed
+    if self.elapsed < 0.05 then return end
+    self.elapsed = 0
+    DrawMinimap()
+  end)
 end
 
 ZR.On("MapChanged", function()
   dirty = true
-  RefreshMapUtils()
+  UpdateButton()
 end)
 ZR.On("RosterChanged", function() dirty = true end)
 ZR.RegisterEvent("GROUP_ROSTER_UPDATE", function() dirty = true end)
 EventUtil.ContinueOnAddOnLoaded("Blizzard_WorldMap", Setup)
 -- Some clients build the world map at startup instead of as its own addon.
-ZR.RegisterEvent("PLAYER_LOGIN", Setup)
+ZR.RegisterEvent("PLAYER_LOGIN", function()
+  Setup()
+  SetupMinimap()
+end)

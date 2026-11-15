@@ -12,9 +12,14 @@ local SEND_EVERY = 5
 local HEARTBEAT = 30
 local MOVED = 0.0015
 local EXPIRE = 75
+local WALKED_IN = 3
+local GLIDE = SEND_EVERY
+local JUMP = 0.2
+local SUMMON_WINDOW = 130
 
 Map.members = {}
-local last = {}
+local last, lastOut = {}, {}
+local inside, leftAt, summonAt, journal
 
 function Map.Showing()
   return ZR.DB().mapPins ~= false
@@ -24,12 +29,24 @@ function Map.Sharing()
   return ZR.DB().mapShare ~= false
 end
 
+function Map.MinimapShowing()
+  return ZR.DB().mapMinimap ~= false
+end
+
+-- Where to draw a member on their own map: gliding from the last spot over one send interval.
+function Map.Position(m, now)
+  local t = m.moveAt and ((now or GetTime()) - m.moveAt) / GLIDE or 1
+  if t >= 1 then return m.x, m.y, false end
+  return m.fromX + (m.x - m.fromX) * t, m.fromY + (m.y - m.fromY) * t, true
+end
+
 local function Changed()
   ZR.Fire("MapChanged")
 end
 
 local function Send(msg)
-  pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, "GUILD")
+  local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, "GUILD")
+  return ok and (result == nil or result == true or result == 0)
 end
 
 local function CanSend()
@@ -48,37 +65,107 @@ local function OwnPosition()
   if ZR.IsSecret(x) or ZR.IsSecret(y) or not x or not y or (x == 0 and y == 0) then return end
   return mapID, x, y
 end
+Map.OwnPosition = OwnPosition
+
+local function Learned()
+  local db = ZR.DB()
+  db.entrances = db.entrances or {}
+  return db.entrances
+end
+
+-- The game's own dungeon entrances, indexed once by journal instance.
+local function JournalEntrance(instanceID)
+  local EJ = C_EncounterJournal
+  if not EJ or not EJ.GetInstanceForGameMap or not EJ.GetDungeonEntrancesForMap or not C_Map.GetMapChildrenInfo then return end
+  local ok, journalID = pcall(EJ.GetInstanceForGameMap, instanceID)
+  if not ok or not journalID or ZR.IsSecret(journalID) then return end
+  if not journal then
+    journal = {}
+    for _, root in ipairs({ 946, 947 }) do
+      for _, zone in ipairs(C_Map.GetMapChildrenInfo(root, Enum.UIMapType.Zone, true) or {}) do
+        local got, list = pcall(EJ.GetDungeonEntrancesForMap, zone.mapID)
+        for _, e in ipairs(got and type(list) == "table" and list or {}) do
+          local id, pos = e.journalInstanceID, e.position
+          if id and pos and not journal[id] then
+            local x, y = pos:GetXY()
+            journal[id] = { zone.mapID, x, y }
+          end
+        end
+      end
+      if next(journal) then break end
+    end
+  end
+  return journal[journalID]
+end
+
+local function FindEntrance(instanceID)
+  local e = Learned()[instanceID] or JournalEntrance(instanceID)
+  if e then return e[1], e[2], e[3] end
+end
+
+local function InstanceKind()
+  local isIn, kind = IsInInstance()
+  if ZR.IsSecret(isIn) or ZR.IsSecret(kind) or not isIn then return end
+  if kind == "party" or kind == "raid" then return kind end
+end
+
+-- Inside, members show at the entrance: where we walked in, else a known spot for that dungeon.
+local function EnterWorld(_, isLogin, isReload)
+  inside = nil
+  wipe(last)
+  local kind = InstanceKind()
+  if not kind then return end
+  local name, _, _, _, _, _, _, instanceID = GetInstanceInfo()
+  if ZR.IsSecret(name) or ZR.IsSecret(instanceID) or not instanceID then return end
+  local now = GetTime()
+  local walked = not isLogin and not isReload and lastOut.at and leftAt and leftAt - lastOut.at <= WALKED_IN
+    and now - (summonAt or -SUMMON_WINDOW) > SUMMON_WINDOW
+    and not (IsInLFGDungeon and IsInLFGDungeon())
+  local mapID, x, y
+  if walked then
+    mapID, x, y = lastOut.mapID, lastOut.x, lastOut.y
+    Learned()[instanceID] = { mapID, x, y }
+  else
+    mapID, x, y = FindEntrance(instanceID)
+  end
+  inside = { id = instanceID, name = name, raid = kind == "raid", mapID = mapID or 0, x = x or 0, y = y or 0 }
+end
+
+local function SampleOutside()
+  if inside then return end
+  local mapID, x, y = OwnPosition()
+  if mapID then lastOut.mapID, lastOut.x, lastOut.y, lastOut.at = mapID, x, y, GetTime() end
+end
 
 -- Sends only after moving, plus a heartbeat so pins never expire while standing still.
 local function Broadcast()
   if not CanSend() then return end
-  local mapID, x, y = OwnPosition()
-  if not mapID then return end
+  local mapID, x, y
+  if inside then
+    mapID, x, y = inside.mapID, inside.x, inside.y
+  else
+    mapID, x, y = OwnPosition()
+    if not mapID then return end
+  end
   local onTaxi = UnitOnTaxi("player")
-  local taxi = (not ZR.IsSecret(onTaxi) and onTaxi) and "1" or "0"
+  local taxi = (not inside and not ZR.IsSecret(onTaxi) and onTaxi) and "1" or "0"
+  local inst = inside and inside.id or 0
   local now = GetTime()
-  local moved = last.mapID ~= mapID or last.taxi ~= taxi
+  local moved = last.mapID ~= mapID or last.taxi ~= taxi or last.inst ~= inst
     or math.abs(x - last.x) > MOVED or math.abs(y - last.y) > MOVED
   if not moved and now - last.at < HEARTBEAT then return end
   local _, class = UnitClass("player")
-  Send(table.concat({ PROTO, "P", mapID, math.floor(x * SCALE + 0.5), math.floor(y * SCALE + 0.5),
-    UnitLevel("player") or 0, class or "", taxi }, "|"))
-  last.mapID, last.x, last.y, last.taxi, last.at = mapID, x, y, taxi, now
-end
-
-local function Store(name, source, mapID, x, y, level, class, taxi)
-  if not name or name == "" or name == ZR.PlayerName() then return end
-  if not mapID or mapID <= 0 or not x or not y or x < 0 or x > 1 or y < 0 or y > 1 then return end
-  local now = GetTime()
-  local m = Map.members[name]
-  -- Ours carries more, so a MapUtils copy of the same player never replaces a fresh one.
-  if m and m.source == "zz" and source ~= "zz" and now - m.at < EXPIRE then return end
-  m = m or { name = name }
-  Map.members[name] = m
-  m.source, m.mapID, m.x, m.y, m.taxi, m.at = source, mapID, x, y, taxi, now
-  if level and level > 0 then m.level = level end
-  if class and RAID_CLASS_COLORS[class] then m.class = class end
-  Changed()
+  local fields = { PROTO, "P", mapID, math.floor(x * SCALE + 0.5), math.floor(y * SCALE + 0.5),
+    UnitLevel("player") or 0, class or "", taxi }
+  -- Appended, so older versions still read the entrance as a normal position.
+  if inside then
+    fields[#fields + 1] = inside.id
+    fields[#fields + 1] = inside.raid and "r" or "d"
+    fields[#fields + 1] = inside.name:gsub("|", ""):sub(1, 60)
+  end
+  -- A blocked send retries next tick instead of waiting for the heartbeat.
+  if not Send(table.concat(fields, "|")) then return end
+  last.mapID, last.x, last.y, last.taxi, last.inst, last.at = mapID, x, y, taxi, inst, now
 end
 
 local function Remove(name)
@@ -86,6 +173,43 @@ local function Remove(name)
     Map.members[name] = nil
     Changed()
   end
+end
+
+local function Store(name, source, mapID, x, y, level, class, taxi, instance)
+  if not name or name == "" or name == ZR.PlayerName() then return end
+  if instance then
+    if mapID and mapID > 0 then
+      Learned()[instance.id] = Learned()[instance.id] or { mapID, x, y }
+    else
+      mapID, x, y = FindEntrance(instance.id)
+    end
+    -- No known entrance: drop the old outdoor pin rather than leave it misleading.
+    if not mapID then return Remove(name) end
+  end
+  if not mapID or mapID <= 0 or not x or not y or x < 0 or x > 1 or y < 0 or y > 1 then return end
+  local now = GetTime()
+  local m = Map.members[name]
+  -- Ours carries more, so a MapUtils copy of the same player never replaces a fresh one.
+  if m and m.source == "zz" and source ~= "zz" and now - m.at < EXPIRE then return end
+  m = m or { name = name }
+  Map.members[name] = m
+  -- Short moves glide; zone changes, teleports and dungeons snap.
+  local fromX, fromY
+  if m.mapID == mapID and m.x and not instance and not m.instance and now - m.at < EXPIRE then
+    local cx, cy = Map.Position(m, now)
+    local dx, dy = math.abs(cx - x), math.abs(cy - y)
+    if dx < JUMP and dy < JUMP and dx + dy > 0.0001 then fromX, fromY = cx, cy end
+  end
+  m.fromX, m.fromY, m.moveAt = fromX, fromY, fromX and now or nil
+  m.source, m.mapID, m.x, m.y, m.taxi, m.instance, m.at = source, mapID, x, y, taxi, instance, now
+  if level and level > 0 then m.level = level end
+  if class and RAID_CLASS_COLORS[class] then m.class = class end
+  Changed()
+end
+
+function Map.Get(name)
+  local m = name and Map.members[name]
+  if m and GetTime() - m.at < EXPIRE then return m end
 end
 
 -- Members seen recently enough to draw.
@@ -113,7 +237,7 @@ local function DropOffline()
   local now, removed = GetTime(), false
   for name, m in pairs(Map.members) do
     local info = ZR.RosterInfo(name)
-    if info and not info.online and now - m.at > 10 then
+    if info and info.online == false and now - m.at > 10 then
       Map.members[name] = nil
       removed = true
     end
@@ -133,14 +257,16 @@ local function OnMessage(_, prefix, text, channel, sender)
     Store(name, "MapUtils", tonumber(mapID), x / SCALE, y / SCALE, tonumber(level), class, taxi == "1")
     return
   end
-  local proto, kind, mapID, x, y, level, class, taxi = strsplit("|", text)
+  local proto, kind, mapID, x, y, level, class, taxi, instID, instKind, instName = strsplit("|", text)
   if proto ~= PROTO then return end
   if kind == "X" then
     Remove(name)
   elseif kind == "P" then
     x, y = tonumber(x), tonumber(y)
     if not x or not y then return end
-    Store(name, "zz", tonumber(mapID), x / SCALE, y / SCALE, tonumber(level), class, taxi == "1")
+    instID = tonumber(instID)
+    local instance = instID and instID > 0 and { id = instID, raid = instKind == "r", name = instName or "" } or nil
+    Store(name, "zz", tonumber(mapID), x / SCALE, y / SCALE, tonumber(level), class, taxi == "1", instance)
   end
 end
 
@@ -156,6 +282,11 @@ function Map.SetShowing(on)
   Changed()
 end
 
+function Map.SetMinimap(on)
+  ZR.DB().mapMinimap = on
+  Changed()
+end
+
 function Map.Init()
   if not C_Map or not C_Map.GetBestMapForUnit or not C_Map.GetPlayerMapPosition then return end
   if C_ChatInfo.RegisterAddonMessagePrefix then
@@ -168,10 +299,17 @@ function Map.Init()
     Broadcast()
     Prune()
   end)
+  C_Timer.NewTicker(1, SampleOutside)
   C_Timer.After(2, Broadcast)
 end
 
 ZR.On("RosterChanged", DropOffline)
+ZR.RegisterEvent("PLAYER_ENTERING_WORLD", EnterWorld)
+ZR.RegisterEvent("PLAYER_LEAVING_WORLD", function()
+  SampleOutside()
+  leftAt = GetTime()
+end)
+ZR.RegisterEvent("CONFIRM_SUMMON", function() summonAt = GetTime() end)
 ZR.RegisterEvent("PLAYER_GUILD_UPDATE", function()
   wipe(Map.members)
   Changed()

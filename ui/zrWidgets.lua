@@ -194,13 +194,16 @@ function UI.InviteToGroup(name)
 end
 
 -- Right-click actions for a guild member, the same everywhere.
-function UI.NameMenu(owner, name, classFile)
+function UI.NameMenu(owner, name, classFile, fromMap)
   if not MenuUtil or not MenuUtil.CreateContextMenu then return end
   local other = name ~= ZR.PlayerName()
   MenuUtil.CreateContextMenu(owner, function(_, root)
     root:CreateTitle(ZR.ColorName(name, classFile))
     root:CreateButton(WHISPER or "Whisper", function() UI.Whisper(name) end):SetEnabled(other)
     root:CreateButton("Invite to group", function() UI.InviteToGroup(name) end):SetEnabled(other)
+    if not fromMap and UI.ShowOnMap then
+      root:CreateButton("Show on map", function() UI.ShowOnMap(name) end):SetEnabled(ZR.Map.Get(name) ~= nil)
+    end
     root:CreateButton("Copy name", function()
       ZR.ShowCopyBox("Copy name", "Press Ctrl+C to copy it.", name)
     end)
