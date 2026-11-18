@@ -19,7 +19,7 @@ local SUMMON_WINDOW = 130
 
 Map.members = {}
 local last, lastOut = {}, {}
-local inside, leftAt, summonAt, journal
+local inside, leftAt, summonAt, journal, played, muted
 
 function Map.Showing()
   return ZR.DB().mapPins ~= false
@@ -137,6 +137,31 @@ local function SampleOutside()
   if mapID then lastOut.mapID, lastOut.x, lastOut.y, lastOut.at = mapID, x, y, GetTime() end
 end
 
+local function Unmute()
+  if not muted then return end
+  for _, frame in ipairs(muted) do frame:RegisterEvent("TIME_PLAYED_MSG") end
+  muted = nil
+end
+
+-- Asked once per login, with the chat frames muted so the reply doesn't print.
+local function RequestPlayed()
+  if not RequestTimePlayed or muted then return end
+  muted = {}
+  for i = 1, NUM_CHAT_WINDOWS or 10 do
+    local frame = _G["ChatFrame" .. i]
+    if frame and frame:IsEventRegistered("TIME_PLAYED_MSG") then
+      frame:UnregisterEvent("TIME_PLAYED_MSG")
+      muted[#muted + 1] = frame
+    end
+  end
+  RequestTimePlayed()
+  C_Timer.After(10, Unmute)
+end
+
+local function PlayedNow()
+  return played and math.floor(played.total + GetTime() - played.at) or ""
+end
+
 -- Sends only after moving, plus a heartbeat so pins never expire while standing still.
 local function Broadcast()
   if not CanSend() then return end
@@ -155,14 +180,11 @@ local function Broadcast()
     or math.abs(x - last.x) > MOVED or math.abs(y - last.y) > MOVED
   if not moved and now - last.at < HEARTBEAT then return end
   local _, class = UnitClass("player")
+  -- Extra fields go last, so older versions still read the first eight as a normal position.
   local fields = { PROTO, "P", mapID, math.floor(x * SCALE + 0.5), math.floor(y * SCALE + 0.5),
-    UnitLevel("player") or 0, class or "", taxi }
-  -- Appended, so older versions still read the entrance as a normal position.
-  if inside then
-    fields[#fields + 1] = inside.id
-    fields[#fields + 1] = inside.raid and "r" or "d"
-    fields[#fields + 1] = inside.name:gsub("|", ""):sub(1, 60)
-  end
+    UnitLevel("player") or 0, class or "", taxi,
+    inside and inside.id or "", inside and (inside.raid and "r" or "d") or "",
+    inside and inside.name:gsub("|", ""):sub(1, 60) or "", PlayedNow() }
   -- A blocked send retries next tick instead of waiting for the heartbeat.
   if not Send(table.concat(fields, "|")) then return end
   last.mapID, last.x, last.y, last.taxi, last.inst, last.at = mapID, x, y, taxi, inst, now
@@ -175,7 +197,7 @@ local function Remove(name)
   end
 end
 
-local function Store(name, source, mapID, x, y, level, class, taxi, instance)
+local function Store(name, source, mapID, x, y, level, class, taxi, instance, playedSecs)
   if not name or name == "" or name == ZR.PlayerName() then return end
   if instance then
     if mapID and mapID > 0 then
@@ -203,6 +225,7 @@ local function Store(name, source, mapID, x, y, level, class, taxi, instance)
   m.fromX, m.fromY, m.moveAt = fromX, fromY, fromX and now or nil
   m.source, m.mapID, m.x, m.y, m.taxi, m.instance, m.at = source, mapID, x, y, taxi, instance, now
   if level and level > 0 then m.level = level end
+  if playedSecs then m.played, m.playedAt = playedSecs, now end
   if class and RAID_CLASS_COLORS[class] then m.class = class end
   Changed()
 end
@@ -257,7 +280,7 @@ local function OnMessage(_, prefix, text, channel, sender)
     Store(name, "MapUtils", tonumber(mapID), x / SCALE, y / SCALE, tonumber(level), class, taxi == "1")
     return
   end
-  local proto, kind, mapID, x, y, level, class, taxi, instID, instKind, instName = strsplit("|", text)
+  local proto, kind, mapID, x, y, level, class, taxi, instID, instKind, instName, playedSecs = strsplit("|", text)
   if proto ~= PROTO then return end
   if kind == "X" then
     Remove(name)
@@ -266,7 +289,8 @@ local function OnMessage(_, prefix, text, channel, sender)
     if not x or not y then return end
     instID = tonumber(instID)
     local instance = instID and instID > 0 and { id = instID, raid = instKind == "r", name = instName or "" } or nil
-    Store(name, "zz", tonumber(mapID), x / SCALE, y / SCALE, tonumber(level), class, taxi == "1", instance)
+    Store(name, "zz", tonumber(mapID), x / SCALE, y / SCALE, tonumber(level), class, taxi == "1", instance,
+      tonumber(playedSecs))
   end
 end
 
@@ -301,6 +325,7 @@ function Map.Init()
   end)
   C_Timer.NewTicker(1, SampleOutside)
   C_Timer.After(2, Broadcast)
+  C_Timer.After(8, RequestPlayed)
 end
 
 ZR.On("RosterChanged", DropOffline)
@@ -310,6 +335,13 @@ ZR.RegisterEvent("PLAYER_LEAVING_WORLD", function()
   leftAt = GetTime()
 end)
 ZR.RegisterEvent("CONFIRM_SUMMON", function() summonAt = GetTime() end)
+-- Also catches a /played typed by the player.
+ZR.RegisterEvent("TIME_PLAYED_MSG", function(_, total)
+  if ZR.IsSecret(total) or type(total) ~= "number" then return end
+  played = { total = total, at = GetTime() }
+  -- Next frame, so this reply still skips the muted chat frames.
+  C_Timer.After(0, Unmute)
+end)
 ZR.RegisterEvent("PLAYER_GUILD_UPDATE", function()
   wipe(Map.members)
   Changed()

@@ -26,6 +26,8 @@ local MINIMAP_YARDS = {
 local pins, rects, miniPins = {}, {}, {}
 local dirty, gliding = true, false
 local focus, pulse
+local details, hovered = {}, nil
+local MAX_DETAILS = 8
 local seen = {}
 local setUp, button
 
@@ -79,43 +81,110 @@ local function Waypoint(m)
   if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then C_SuperTrack.SetSuperTrackedUserWaypoint(true) end
 end
 
-local function AddProfessions(name)
+local function AddProfessions(tt, name)
   local Crafts = ZR.Crafts
   for _, prof in ipairs(Crafts.PROFESSIONS) do
     local p = Crafts.GetProf(name, prof.id)
     if p and (p.m or 0) > 0 then
-      GameTooltip:AddDoubleLine("|T" .. prof.icon .. ":14:14|t " .. Crafts.ProfName(prof.id), p.r .. "/" .. p.m,
+      tt:AddDoubleLine("|T" .. prof.icon .. ":14:14|t " .. Crafts.ProfName(prof.id), p.r .. "/" .. p.m,
         1, 0.82, 0, 1, 1, 1)
+    end
+  end
+  -- Missing means an older addon version, so those stay out rather than read as not learned.
+  for _, prof in ipairs(Crafts.SECONDARY) do
+    local p = Crafts.GetProf(name, prof.id)
+    if p then
+      local label = "|T" .. prof.icon .. ":14:14|t " .. Crafts.ProfName(prof.id)
+      if (p.m or 0) > 0 then
+        tt:AddDoubleLine(label, p.r .. "/" .. p.m, 1, 0.82, 0, 1, 1, 1)
+      else
+        tt:AddDoubleLine(label, "Not learned", 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
+      end
     end
   end
 end
 
-local function MemberTooltip(pin, m)
+local function PlayedText(secs)
+  secs = math.floor(secs)
+  return ("%dd, %dh, %dm, %ds"):format(math.floor(secs / 86400), math.floor(secs % 86400 / 3600),
+    math.floor(secs % 3600 / 60), secs % 60)
+end
+
+-- One member's lines, shared by the single tooltip and the Shift view of a group.
+local function FillMember(tt, m)
   local info = ZR.RosterInfo(m.name)
-  GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
-  GameTooltip_SetTitle(GameTooltip, ZR.ColorName(m.name, ClassOf(m)))
+  GameTooltip_SetTitle(tt, ZR.ColorName(m.name, ClassOf(m)))
   local bits = {}
   if info and info.rank then bits[#bits + 1] = info.rank end
   local level = (info and info.level) or m.level
   if level and level > 0 then bits[#bits + 1] = (LEVEL or "Level") .. " " .. level end
-  if #bits > 0 then GameTooltip:AddLine(table.concat(bits, ", "), 1, 1, 1) end
+  if #bits > 0 then tt:AddLine(table.concat(bits, ", "), 1, 1, 1) end
+  if m.played then
+    tt:AddLine("Played " .. PlayedText(m.played + GetTime() - m.playedAt), 0.8, 0.8, 0.8)
+  end
   local mapInfo = C_Map.GetMapInfo(m.mapID)
   if m.instance then
-    GameTooltip:AddLine("In " .. (m.instance.name ~= "" and m.instance.name or (m.instance.raid and "a raid" or "a dungeon")), 0.6, 0.8, 1)
-    if mapInfo and mapInfo.name then GameTooltip:AddLine("Entrance in " .. mapInfo.name, 0.7, 0.7, 0.7) end
+    tt:AddLine("In " .. (m.instance.name ~= "" and m.instance.name or (m.instance.raid and "a raid" or "a dungeon")), 0.6, 0.8, 1)
+    if mapInfo and mapInfo.name then tt:AddLine("Entrance in " .. mapInfo.name, 0.7, 0.7, 0.7) end
   elseif mapInfo and mapInfo.name then
-    GameTooltip:AddLine(mapInfo.name, 0.7, 0.7, 0.7)
+    tt:AddLine(mapInfo.name, 0.7, 0.7, 0.7)
   end
-  if m.taxi then GameTooltip:AddLine("On a flight path", 1, 0.82, 0) end
-  AddProfessions(m.name)
-  GameTooltip:AddLine(" ")
-  GameTooltip:AddLine(("Updated %ds ago%s"):format(math.max(0, math.floor(GetTime() - m.at)),
+  if m.taxi then tt:AddLine("On a flight path", 1, 0.82, 0) end
+  AddProfessions(tt, m.name)
+  tt:AddLine(" ")
+  tt:AddLine(("Updated %ds ago%s"):format(math.max(0, math.floor(GetTime() - m.at)),
     m.source == "MapUtils" and ", shared by MapUtils" or ""), 0.5, 0.5, 0.5)
+end
+
+local function MemberTooltip(pin, m)
+  GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
+  FillMember(GameTooltip, m)
   GameTooltip:AddLine("Right-click for more, Shift-click for a waypoint.", 0.6, 0.6, 0.6, true)
   GameTooltip:Show()
 end
 
-local function ClusterTooltip(pin, list)
+local function DetailTooltip(i)
+  if i == 1 then return GameTooltip end
+  local tt = details[i] or CreateFrame("GameTooltip", "ZUGZUGRebornMapTooltip" .. i, UIParent, "GameTooltipTemplate")
+  details[i] = tt
+  tt:SetScale(GameTooltip:GetScale())
+  return tt
+end
+
+local function HideDetails()
+  for _, tt in pairs(details) do tt:Hide() end
+end
+
+-- Each member's full tooltip side by side, starting a new row at the screen edge.
+local function GroupDetails(pin, list)
+  local shown = math.min(#list, MAX_DETAILS)
+  local rowStart, rowBottom, prev
+  for i = 1, shown do
+    local tt = DetailTooltip(i)
+    tt:SetOwner(pin, i == 1 and "ANCHOR_RIGHT" or "ANCHOR_NONE")
+    FillMember(tt, list[i])
+    if i == shown and #list > shown then tt:AddLine(("And %d more"):format(#list - shown), 0.6, 0.6, 0.6) end
+    tt:Show()
+    if i > 1 then
+      local screen = UIParent:GetRight() * UIParent:GetEffectiveScale() / tt:GetEffectiveScale()
+      tt:ClearAllPoints()
+      if (prev:GetRight() or 0) + tt:GetWidth() > screen then
+        tt:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", rowStart:GetLeft() or 0, rowBottom - 2)
+        rowStart, rowBottom = tt, nil
+      else
+        tt:SetPoint("TOPLEFT", prev, "TOPRIGHT", 2, 0)
+      end
+    else
+      rowStart = tt
+    end
+    local bottom = tt:GetBottom() or 0
+    rowBottom = math.min(rowBottom or bottom, bottom)
+    prev = tt
+  end
+end
+
+local function GroupTooltip(pin, list)
+  if IsShiftKeyDown() then return GroupDetails(pin, list) end
   GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
   GameTooltip_SetTitle(GameTooltip, #list .. " guild members")
   for _, m in ipairs(list) do
@@ -124,12 +193,21 @@ local function ClusterTooltip(pin, list)
     GameTooltip:AddDoubleLine(ZR.ColorName(m.name, ClassOf(m)), where, 1, 1, 1, 0.7, 0.7, 0.7)
   end
   GameTooltip:AddLine(" ")
+  GameTooltip:AddLine("Hold Shift to see each of them.", 0.6, 0.6, 0.6)
   GameTooltip:AddLine("Right-click to pick who to whisper.", 0.6, 0.6, 0.6)
   GameTooltip:Show()
 end
 
 local function PinEnter(pin)
-  if #pin.list == 1 then MemberTooltip(pin, pin.list[1]) else ClusterTooltip(pin, pin.list) end
+  hovered = pin
+  HideDetails()
+  if #pin.list == 1 then MemberTooltip(pin, pin.list[1]) else GroupTooltip(pin, pin.list) end
+end
+
+local function PinLeave()
+  hovered = nil
+  HideDetails()
+  GameTooltip_Hide()
 end
 
 local function ClusterMenu(pin)
@@ -170,8 +248,10 @@ local function CreatePin(canvas)
   pin.Count:SetPoint("CENTER")
   pin.Badge = pin:CreateTexture(nil, "OVERLAY", nil, 1)
   pin:SetScript("OnEnter", PinEnter)
-  pin:SetScript("OnLeave", GameTooltip_Hide)
-  pin:SetScript("OnHide", function(self) if GameTooltip:IsOwned(self) then GameTooltip:Hide() end end)
+  pin:SetScript("OnLeave", PinLeave)
+  pin:SetScript("OnHide", function(self)
+    if hovered == self then PinLeave() elseif GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+  end)
   pin:SetScript("OnClick", PinClick)
   return pin
 end
@@ -632,6 +712,9 @@ ZR.On("MapChanged", function()
   UpdateButton()
 end)
 ZR.On("RosterChanged", function() dirty = true end)
+ZR.RegisterEvent("MODIFIER_STATE_CHANGED", function()
+  if hovered and hovered:IsShown() and hovered:IsMouseOver() then PinEnter(hovered) end
+end)
 ZR.RegisterEvent("GROUP_ROSTER_UPDATE", function() dirty = true end)
 EventUtil.ContinueOnAddOnLoaded("Blizzard_WorldMap", Setup)
 -- Some clients build the world map at startup instead of as its own addon.
