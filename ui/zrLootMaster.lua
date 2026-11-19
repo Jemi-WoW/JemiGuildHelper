@@ -105,7 +105,7 @@ local function Refresh()
   end
   for i = #panel.items + 1, #panel.rows do panel.rows[i]:Hide() end
   local ev = Loot.CurrentRaid()
-  panel.Source:SetText(ev and ("Reserves from |cffffffff%s|r"):format(ZR.Raids.Title(ev)) or "No raid planned right now, so every item is a free roll")
+  panel.Source:SetText(ev and ("Reserves from |cffffffff%s|r"):format(ZR.Raids.Title(ev)) or "Not inside a planned raid, so every item is a free roll")
   panel:SetHeight(62 + #panel.items * (ROW + 4))
 end
 
@@ -139,7 +139,7 @@ end
 
 -- Read at once: autoloot can empty the loot window within the same frame.
 local function Open()
-  if not Loot.CanLead() then return end
+  if not Loot.CanLead() or not Loot.CurrentRaid() then return end
   local items = Items()
   if #items == 0 then return end
   if not panel then Build() end
@@ -153,6 +153,9 @@ end
 -- The list stays after looting, autoloot included, until closed or the next loot opens.
 ZR.RegisterEvent("LOOT_READY", Open)
 ZR.RegisterEvent("LOOT_OPENED", Open)
+ZR.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+  if panel and panel:IsShown() and not Loot.CurrentRaid() then panel:Hide() end
+end)
 ZR.On("LootStart", Refresh)
 ZR.On("LootEnd", Refresh)
 ZR.On("RaidsChanged", Refresh)

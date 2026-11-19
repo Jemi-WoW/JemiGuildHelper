@@ -94,11 +94,12 @@ local function Trusted(sender)
   return UnitIsGroupLeader(sender) or UnitIsGroupAssistant(sender) or MasterLooter() == sender
 end
 
--- The planned raid happening now: started up to 8 hours ago or starting within 2.
+-- The planned raid you're inside right now: started up to 8 hours ago or starting within 2.
 function Loot.CurrentRaid()
   local now, best = ZR.Now(), nil
   for _, ev in ipairs(ZR.Raids.List()) do
-    if ev.start <= now + RAID_BEFORE and ev.start >= now - RAID_AFTER and (not best or ev.start > best.start) then best = ev end
+    if ev.start <= now + RAID_BEFORE and ev.start >= now - RAID_AFTER and (not best or ev.start > best.start)
+      and ZR.Raids.InsideRaid(ev.raid) then best = ev end
   end
   return best
 end

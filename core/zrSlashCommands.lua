@@ -58,7 +58,7 @@ SlashCmdList["ZUGZUGREBORN"] = function(msg)
 
   if cmd == "itemrolltest" then
     if arg == "enable" or arg == "disable" then ZR.Loot.SetTest(arg == "enable") end
-    ZR.Msg(ZR.Loot.test and "Item roll test is on: loot anything and the roll panel opens, or use /zr roll [item]. Reserves on TEMP ITEM count for whatever you loot."
+    ZR.Msg(ZR.Loot.test and "Item roll test is on: loot anything inside a planned raid and the roll panel opens, or use /zr roll [item]. Reserves on TEMP ITEM count for whatever you loot."
       or "Item roll test is off.")
     return
   end

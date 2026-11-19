@@ -26,9 +26,9 @@ Raids.LIST = {
   { key = "barrow", name = "Barrow Deeps", size = 10, where = "Mount Hyjal", icon = "Interface\\Icons\\Spell_Nature_Sleep",
     map = 2482, x = 0.70, y = 0.62 },
   { key = "hyjal", name = "Hyjal Summit", size = 20, where = "Mount Hyjal", icon = "Interface\\Icons\\Spell_Nature_Tranquility",
-    map = 2482, x = 0.85, y = 0.33 },
+    map = 2482, x = 0.85, y = 0.33, zones = { "The Battle for Mount Hyjal" } },
   { key = "onyxia", name = "Onyxia's Lair", size = 40, where = "Dustwallow Marsh", icon = "Interface\\Icons\\INV_Misc_Head_Dragon_Black",
-    map = 1445, x = 0.526, y = 0.768, note = "Every raider needs the Drakefire Amulet." },
+    map = 1445, x = 0.526, y = 0.768, instance = 249, note = "Every raider needs the Drakefire Amulet." },
   { key = "other", name = "Other", size = 20, icon = "Interface\\Icons\\INV_Misc_QuestionMark" },
 }
 Raids.SIZES = { 10, 20, 40 }
@@ -92,6 +92,21 @@ function Raids.Info(key)
     if r.key == key then return r end
   end
   return Raids.LIST[#Raids.LIST]
+end
+
+-- Matched by instance ID when known, else by the instance's name; Other counts any raid instance.
+function Raids.InsideRaid(key)
+  local name, kind, _, _, _, _, _, instanceID = GetInstanceInfo()
+  if ZR.IsSecret(name) or ZR.IsSecret(kind) or kind ~= "raid" then return false end
+  local r = Raids.Info(key)
+  if r.key == "other" then return true end
+  if r.instance and r.instance == instanceID then return true end
+  name = (name or ""):lower()
+  if name == r.name:lower() then return true end
+  for _, zone in ipairs(r.zones or {}) do
+    if name == zone:lower() then return true end
+  end
+  return false
 end
 
 function Raids.Title(ev)
