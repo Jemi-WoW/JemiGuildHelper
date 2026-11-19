@@ -12,12 +12,12 @@ local RETRY_FOR = 120
 
 -- Grats lines, one picked at random: {name} is their first name, {level} the level, {prof} the profession.
 local GRATS_LEVEL = {
-  "Gz on {level}, {name}!",
-  "Grats on level {level}, {name}!",
+  "Gz {name}!",
+  "Grats {name}!",
 }
 local GRATS_MAX_LEVEL = {
-  "Gz on {level}, {name}!",
-  "Grats on level {level}, {name}!",
+  "Gz {name}!",
+  "Grats {name}!",
 }
 local GRATS_PROF = {
   "Gz on 300 {prof}, {name}!",
