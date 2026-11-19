@@ -46,7 +46,7 @@ end
 
 -- One /who per click; key bindings count as clicks too.
 local function Scan()
-  if not ZR.IsOfficer() then return end
+  if not ZR.IsRecruiter() then return end
   local minL, maxL, className = ReadParams()
   if Who.state == "idle" or Who.state == "done" or ParamsChanged(minL, maxL, className) then
     if Who.state == "waiting" then return end

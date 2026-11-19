@@ -36,7 +36,7 @@ local function DataObject()
       tt:AddLine(ZR.TITLE, 1, 0.82, 0)
       tt:AddLine("Click: open where you left off", 1, 1, 1)
       tt:AddLine("Drag: move icon", 1, 1, 1)
-      local unread = ZR.IsOfficer() and ZR.Inbox.Unread() or 0
+      local unread = ZR.IsRecruiter() and ZR.Inbox.Unread() or 0
       if unread > 0 then
         tt:AddLine(("%d unread whisper%s"):format(unread, unread == 1 and "" or "s"), 1, 0.5, 1)
       end

@@ -25,7 +25,7 @@ end
 
 -- Reopens where the player left off; first time, officers start on Recruitment.
 local function DefaultKey()
-  return currentKey or ZR.DB().lastFeature or (ZR.IsOfficer() and "recruitment" or "crafters")
+  return currentKey or ZR.DB().lastFeature or (ZR.IsRecruiter() and "recruitment" or "crafters")
 end
 
 local function SavedTab(f)
@@ -88,9 +88,9 @@ local function BuildLock()
   lock.Icon:SetAtlas("communities-icon-lock")
   lock.Icon:SetSize(36, 45)
   lock.Icon:SetPoint("CENTER", 0, 40)
-  lock.Text = UI.Text(lock, "GameFontNormalLarge", "Only officers can view this page.")
+  lock.Text = UI.Text(lock, "GameFontNormalLarge")
   lock.Text:SetPoint("TOP", lock.Icon, "BOTTOM", 0, -12)
-  lock.Sub = UI.Text(lock, "GameFontHighlight", "Ask an officer if you want to help with recruiting.")
+  lock.Sub = UI.Text(lock, "GameFontHighlight")
   lock.Sub:SetPoint("TOP", lock.Text, "BOTTOM", 0, -8)
   lock:Hide()
   page.Lock = lock
@@ -192,7 +192,7 @@ function GF.RefreshTabLabels()
     end
   end
   if sideTab then
-    sideTab.Unread:SetShown(ZR.IsOfficer() and ZR.Inbox.Unread() > 0)
+    sideTab.Unread:SetShown(ZR.IsRecruiter() and ZR.Inbox.Unread() > 0)
   end
 end
 
@@ -209,7 +209,7 @@ function GF.SelectFeature(key)
   if not f then return end
   currentKey = f.key
   ZR.DB().lastFeature = f.key
-  local allowed = not f.officerOnly or ZR.IsOfficer()
+  local allowed = not f.access or f.access()
   for _, other in ipairs(UI.features) do
     UI.SetIconTabSelected(other.iconTab, other == f)
     if other ~= f then
@@ -218,6 +218,8 @@ function GF.SelectFeature(key)
     end
   end
   page.Title:SetText(f.title)
+  page.Lock.Text:SetText(f.lockText or "")
+  page.Lock.Sub:SetText(f.lockSub or "")
   page.Lock:SetShown(not allowed)
   if allowed then
     BuildFeature(f)

@@ -14,11 +14,12 @@ local ticker
 local replyTimer
 
 local function Enabled()
-  return ZR.DB().sync and ZR.IsOfficer() and IsInGuild()
+  return ZR.DB().sync and ZR.IsRecruiter() and IsInGuild()
 end
 
+-- Guild channel, since recruiting ranks below officer cannot use officer chat.
 local function Send(msg)
-  local ok, result = pcall(C_ChatInfo.SendAddonMessage, ZR.SYNC_PREFIX, msg, "OFFICER")
+  local ok, result = pcall(C_ChatInfo.SendAddonMessage, ZR.SYNC_PREFIX, msg, "GUILD")
   if not ok then return true end
   -- 3 and 8 are throttles; anything else will not succeed on retry.
   return result ~= 3 and result ~= 8
@@ -70,7 +71,8 @@ local function Reply(since)
 end
 
 local function OnMessage(_, prefix, text, channel, sender)
-  if prefix ~= ZR.SYNC_PREFIX or channel ~= "OFFICER" then return end
+  -- Older versions still send on the officer channel.
+  if prefix ~= ZR.SYNC_PREFIX or (channel ~= "GUILD" and channel ~= "OFFICER") then return end
   if ZR.IsSecret(text) or ZR.IsSecret(sender) or not Enabled() then return end
   sender = ZR.StripRealm(sender)
   if sender == ZR.PlayerName() then return end

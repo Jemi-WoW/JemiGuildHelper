@@ -9,6 +9,10 @@ local function PrintHelp()
   ZR.Msg("  |cffffd100/zr recruit|r - open Recruitment")
   ZR.Msg("  |cffffd100/zr whispers|r - open the Whispers tab")
   ZR.Msg("  |cffffd100/zr craft <item>|r - find who in the guild can craft it")
+  ZR.Msg("  |cffffd100/zr raids|r - open raid sign-ups")
+  ZR.Msg("  |cffffd100/zr clock 12|r or |cffffd10024|r - how raid times are shown")
+  ZR.Msg("  |cffffd100/zr roll [item]|r - start a roll for an item (raid leader, assistant or master looter)")
+  ZR.Msg("  |cffffd100/zr dings on|r or |cffffd100off|r - guild level-up popups (|cffffd100preview|r to place them, |cffffd100reset|r to move them back)")
   ZR.Msg("  |cffffd100/zr minimap|r - show or hide the minimap icon")
   ZR.Msg("  |cffffd100/zr map on|r or |cffffd100off|r - guild members on the world map")
   ZR.Msg("  |cffffd100/zr map share on|r or |cffffd100off|r - share your own position with the guild")
@@ -20,6 +24,7 @@ local function PrintHelp()
 end
 
 SlashCmdList["ZUGZUGREBORN"] = function(msg)
+  local raw = msg or ""
   msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
   local cmd, arg = msg:match("^(%S*)%s*(.-)$")
 
@@ -36,6 +41,46 @@ SlashCmdList["ZUGZUGREBORN"] = function(msg)
   if cmd == "craft" or cmd == "crafters" then
     ZR.OpenPage("crafters")
     if arg ~= "" then ZR.UI.CraftersSearch(arg) end
+    return
+  end
+
+  if cmd == "raids" or cmd == "raid" then
+    ZR.OpenPage("raids")
+    return
+  end
+
+  if cmd == "roll" then
+    -- Item links keep their case, so they come from the raw text.
+    local link = raw:match("(|c.-|Hitem:.-|h.-|h|r)")
+    if link then ZR.Loot.Start(link) else ZR.Msg("Shift-click an item into the command: /zr roll [item]") end
+    return
+  end
+
+  if cmd == "itemrolltest" then
+    if arg == "enable" or arg == "disable" then ZR.Loot.SetTest(arg == "enable") end
+    ZR.Msg(ZR.Loot.test and "Item roll test is on: loot anything and the roll panel opens, or use /zr roll [item]. Reserves on TEMP ITEM count for whatever you loot."
+      or "Item roll test is off.")
+    return
+  end
+
+  if cmd == "clock" then
+    if arg == "12" or arg == "24" then ZR.Raids.SetClock(tonumber(arg)) end
+    ZR.Msg("Raid times use a " .. (ZR.Raids.Use12h() and "12" or "24") .. " hour clock.")
+    return
+  end
+
+  if cmd == "dings" or cmd == "ding" then
+    if arg == "on" or arg == "off" then
+      ZR.Dings.SetEnabled(arg == "on")
+    elseif arg == "preview" then
+      ZR.UI.PreviewDing()
+      return
+    elseif arg == "reset" then
+      ZR.UI.ResetToastPosition()
+      ZR.Msg("Popups are back in their default spot.")
+      return
+    end
+    ZR.Msg("Guild level-up popups are " .. (ZR.Dings.Enabled() and "on." or "off."))
     return
   end
 

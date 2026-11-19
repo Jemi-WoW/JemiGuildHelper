@@ -10,7 +10,9 @@ UI.RegisterFeature({
   key = "recruitment",
   title = "Recruitment",
   icon = "Interface\\Icons\\INV_Misc_GroupNeedMore",
-  officerOnly = true,
+  access = function() return ZR.IsRecruiter() end,
+  lockText = "Only officers and OGs can view this page.",
+  lockSub = "Ask an officer if you want to help with recruiting.",
   tabs = { "Recruit Message", "Fast Invite", "Whispers" },
 
   tabLabel = function(index)

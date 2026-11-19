@@ -1,7 +1,10 @@
 local _, ZR = ...
 
 local roster = {}
-local lastOfficer
+local lastAccess
+
+-- Ranks below officer that may still recruit, matched by name in lower case.
+ZR.RECRUITER_RANKS = { og = true }
 
 function ZR.IsOfficer()
   if not IsInGuild() then return false end
@@ -9,9 +12,15 @@ function ZR.IsOfficer()
   return C_GuildInfo.IsGuildOfficer and C_GuildInfo.IsGuildOfficer() or false
 end
 
+function ZR.IsRecruiter()
+  if ZR.IsOfficer() then return true end
+  local _, rank = GetGuildInfo("player")
+  return type(rank) == "string" and ZR.RECRUITER_RANKS[strtrim(rank):lower()] or false
+end
+
 -- The user's own /ginvite fails without the rank's invite right.
 function ZR.CanInvite()
-  return ZR.IsOfficer() and (CanGuildInvite == nil or CanGuildInvite()) or false
+  return ZR.IsRecruiter() and (CanGuildInvite == nil or CanGuildInvite()) or false
 end
 
 -- Roster names may carry a realm suffix.
@@ -61,6 +70,11 @@ function ZR.RosterInfo(name)
   return name and roster[name] or nil
 end
 
+-- Read only; keyed by name with and without realm.
+function ZR.Roster()
+  return roster
+end
+
 function ZR.RosterComplete()
   return complete
 end
@@ -70,10 +84,10 @@ function ZR.RequestRoster()
 end
 
 local function CheckOfficer()
-  local now = ZR.IsOfficer()
-  if now ~= lastOfficer then
-    lastOfficer = now
-    ZR.Fire("OfficerChanged", now)
+  local now = (ZR.IsOfficer() and "o" or "") .. (ZR.IsRecruiter() and "r" or "")
+  if now ~= lastAccess then
+    lastAccess = now
+    ZR.Fire("OfficerChanged", ZR.IsOfficer())
   end
 end
 ZR.CheckOfficer = CheckOfficer

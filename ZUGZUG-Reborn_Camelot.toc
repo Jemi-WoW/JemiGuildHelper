@@ -27,8 +27,13 @@ core/zrItemCategories.lua
 core/zrCrafts.lua
 core/zrCraftSync.lua
 core/zrMapSync.lua
+core/zrDings.lua
+core/zrRaids.lua
+core/zrRaidLoot.lua
+core/zrLoot.lua
 
 ui/zrWidgets.lua
+ui/zrToast.lua
 ui/zrGuildFrame.lua
 ui/recruitment/zrRecruitMessage.lua
 ui/recruitment/zrFastInvite.lua
@@ -37,6 +42,12 @@ ui/zrPanels_Recruitment.lua
 ui/crafters/zrCategoryList.lua
 ui/crafters/zrCrafters.lua
 ui/zrPanels_Crafters.lua
+ui/raids/zrItemPicker.lua
+ui/raids/zrRaidEditor.lua
+ui/raids/zrRaids.lua
+ui/zrPanels_Raids.lua
+ui/zrRollFrame.lua
+ui/zrLootMaster.lua
 ui/zrMinimap.lua
 ui/zrMapPins.lua
 

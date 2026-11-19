@@ -168,7 +168,7 @@ local function Post()
 end
 
 function ZR.BindingPost()
-  if ZR.IsOfficer() then Post() end
+  if ZR.IsRecruiter() then Post() end
 end
 
 function UI.BuildRecruitMessage(parent, inset)

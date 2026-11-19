@@ -12,11 +12,14 @@ Runs on **WoW Forever**.
 - **Quick invites** — Invite hands you `/ginvite Name` ready to paste (Blizzard blocks addon invites on Forever)
 - **No double spam** — contacted players hide for 3 days, declines stay visible with a count
 - **Whispers** — every whisper in one inbox, reply right there
-- **Officer sync** — officers share who was already contacted, even across layers
+- **Recruiter sync** — officers and OGs share who was already contacted, even across layers
 - **Crafters** — for every guild member: search who can craft an item, browse by profession or Auction House category, see each member's recipes and whisper them
 - **Automatic** — your recipes are read at login and shared with the guild, new ones as soon as you learn them
 - **Guild map** — guild members show on the world map with their class icon, level and professions; members inside a dungeon line up above its entrance.
-- **Officers only** — Recruitment is locked for everyone else
+- **Raid sign-ups** — officers plan Barrow Deeps, Hyjal Summit, Onyxia's Lair or any other raid; everyone signs up as Tank, Healer, Melee or Ranged, or marks Late, Tentative, Bench or Absent, with a reminder 15 minutes before
+- **Loot rolls** — the raid leader rolls off each drop from the loot window; everyone gets a roll popup that follows the raid's soft and hard reserves, and /roll from players without the addon counts too
+- **Guild dings** — a popup when a guildmate levels up or maxes a profession, with a Grats button for guild chat
+- **Officers and OGs** — Recruitment is locked for everyone else
 
 ## Using it
 

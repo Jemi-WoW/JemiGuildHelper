@@ -209,3 +209,179 @@ function UI.NameMenu(owner, name, classFile, fromMap)
     end)
   end)
 end
+
+local picker
+
+-- first maps names listed ahead of everyone (a raid's sign-ups) to their class, so guests show too.
+local function Members(filter, first)
+  local out, seen, listed = {}, {}, {}
+  for name, info in pairs(ZR.Roster()) do
+    if not name:find("-", 1, true) and not seen[info] and (filter == "" or name:lower():find(filter, 1, true)) then
+      seen[info] = true
+      listed[name] = true
+      out[#out + 1] = { name = name, info = info, first = first and first[name] and true or false }
+    end
+  end
+  for name, class in pairs(first or {}) do
+    if not listed[name] and not ZR.RosterInfo(name) and (filter == "" or name:lower():find(filter, 1, true)) then
+      out[#out + 1] = { name = name, info = { classFile = class ~= true and class or nil }, first = true }
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.first ~= b.first then return a.first end
+    local ao, bo = a.info.online and true or false, b.info.online and true or false
+    if ao ~= bo then return ao end
+    return a.name < b.name
+  end)
+  return out
+end
+
+local function Pick(name, guest)
+  local owner, onPick = picker.owner, picker.onPick
+  picker:Hide()
+  if not owner or not name or name == "" then return end
+  if owner.SetMember then owner:SetMember(name) end
+  if onPick then onPick(name, guest) end
+end
+
+-- Typed names get capitals like in-game names.
+local function NameCase(text)
+  return (strtrim(text):gsub("%s+", " "):gsub("(%a)([%w']*)", function(a, b) return a:upper() .. b:lower() end))
+end
+
+local function PickerRow(row, data)
+  if not row.Name then
+    row:SetHighlightTexture("Interface\\FriendsFrame\\UI-FriendsFrame-HighlightBar", "ADD")
+    row.Dot = row:CreateTexture(nil, "ARTWORK")
+    row.Dot:SetSize(12, 12)
+    row.Dot:SetPoint("LEFT", 4, 0)
+    row.Class = row:CreateTexture(nil, "ARTWORK")
+    row.Class:SetSize(14, 14)
+    row.Class:SetPoint("LEFT", row.Dot, "RIGHT", 4, 0)
+    row.Level = UI.CreateCell(row, "GameFontDisableSmall", "RIGHT")
+    row.Level:SetPoint("RIGHT", -6, 0)
+    row.Name = UI.CreateCell(row, "GameFontHighlightSmall")
+    row.Name:SetPoint("LEFT", row.Class, "RIGHT", 5, 0)
+    row.Name:SetPoint("RIGHT", row.Level, "LEFT", -4, 0)
+    row:SetScript("OnClick", function(self) Pick(self.name, self.guest) end)
+  end
+  local info = data.info
+  row.name, row.guest = data.name, data.guest
+  if data.guest then
+    row.Dot:Hide()
+    row.Class:Hide()
+    row.Name:SetText(("|cff40ff40+ Add \"%s\" as a guest|r"):format(data.name))
+    row.Level:SetText("")
+    return
+  end
+  row.Dot:Show()
+  row.Dot:SetTexture(info.online and "Interface\\FriendsFrame\\StatusIcon-Online" or "Interface\\FriendsFrame\\StatusIcon-Offline")
+  row.Class:SetShown(info.classFile ~= nil)
+  if info.classFile then row.Class:SetAtlas("classicon-" .. info.classFile:lower()) end
+  row.Name:SetText(ZR.ColorName(data.name, info.classFile))
+  row.Level:SetText(data.first and "|cff40ff40signed|r" or (info.level or ""))
+end
+
+local function Refresh()
+  local text = strtrim(picker.Search:GetText())
+  local list = Members(text:lower(), picker.first)
+  -- Someone outside the guild can be added by name.
+  if picker.allowGuest and text ~= "" then
+    local exact = false
+    for _, m in ipairs(list) do
+      if m.name:lower() == text:lower() then exact = true end
+    end
+    if not exact then table.insert(list, 1, { name = NameCase(text), info = {}, guest = true }) end
+  end
+  picker.List:SetRows(list)
+  picker.Empty:SetShown(#list == 0)
+  picker.top = list[1] and list[1].name
+  picker.topGuest = list[1] and list[1].guest
+end
+
+local function BuildPicker()
+  picker = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+  picker:SetSize(240, 280)
+  picker:SetFrameStrata("FULLSCREEN_DIALOG")
+  picker:SetClampedToScreen(true)
+  picker:EnableMouse(true)
+  picker:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 16,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 },
+  })
+  picker:SetBackdropColor(0.05, 0.05, 0.05, 1)
+  picker:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+  picker.Search = CreateFrame("EditBox", nil, picker, "SearchBoxTemplate")
+  picker.Search:SetHeight(20)
+  picker.Search:SetPoint("TOPLEFT", 14, -8)
+  picker.Search:SetPoint("TOPRIGHT", -10, -8)
+  picker.Search:HookScript("OnTextChanged", Refresh)
+  picker.Search:SetScript("OnEscapePressed", function() picker:Hide() end)
+  -- Enter takes the top match, or the typed name when nobody matches.
+  picker.Search:SetScript("OnEnterPressed", function(self)
+    if picker.top then Pick(picker.top, picker.topGuest) else Pick(strtrim(self:GetText())) end
+  end)
+  picker.List = UI.CreateTable(picker, { { title = "", width = 0 } }, nil, 20, PickerRow)
+  picker.List:SetPoint("TOPLEFT", 8, -34)
+  picker.List:SetPoint("BOTTOMRIGHT", -8, 8)
+  picker.List.Header:Hide()
+  picker.List.ScrollBox:SetPoint("TOPLEFT", picker.List, "TOPLEFT", 0, 0)
+  picker.Empty = UI.Text(picker, "GameFontDisableSmall", "No guild member by that name.")
+  picker.Empty:SetPoint("CENTER", 0, -10)
+  -- Closes on a click anywhere else, like a normal dropdown.
+  picker:SetScript("OnUpdate", function(self)
+    local down = IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")
+    if down and not self:IsMouseOver() and not (self.owner and self.owner:IsMouseOver()) then self:Hide() end
+  end)
+  picker:SetScript("OnHide", function(self)
+    self.Search:ClearFocus()
+    self.owner, self.onPick, self.first, self.allowGuest = nil, nil, nil, nil
+  end)
+  picker:Hide()
+end
+
+local function TogglePicker(owner, onPick, first, allowGuest)
+  if not picker then BuildPicker() end
+  if picker:IsShown() and picker.owner == owner then
+    picker:Hide()
+    return
+  end
+  ZR.RequestRoster()
+  picker.owner, picker.onPick, picker.first, picker.allowGuest = owner, onPick, first, allowGuest
+  picker:ClearAllPoints()
+  picker:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", 0, -2)
+  picker.Search:SetText("")
+  picker:Show()
+  Refresh()
+  picker.Search:SetFocus()
+end
+
+-- A dropdown of guild members with a search box; onPick(name) runs after a choice.
+function UI.CreateMemberPicker(parent, width, onPick)
+  local dd = CreateFrame("DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+  dd:SetWidth(width)
+  dd.onPick = onPick
+  function dd:SetMember(name)
+    self.member = name
+    local info = ZR.RosterInfo(name)
+    local text = ZR.ColorName(name, info and info.classFile)
+    if self.SetDefaultText then self:SetDefaultText(text) elseif self.Text then self.Text:SetText(text) end
+  end
+  function dd:GetMember()
+    return self.member
+  end
+  dd:HookScript("OnMouseDown", function(self, button)
+    if button == "LeftButton" then TogglePicker(self, self.onPick) end
+  end)
+  dd:HookScript("OnHide", function(self)
+    if picker and picker.owner == self then picker:Hide() end
+  end)
+  return dd
+end
+
+-- Opens the member list under anchor; onPick(name, guest). allowGuest offers typed names from outside the guild.
+function UI.PickMember(anchor, onPick, first, allowGuest)
+  TogglePicker(anchor, onPick, first, allowGuest)
+end
