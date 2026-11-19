@@ -14,12 +14,10 @@ local RETRY_FOR = 120
 local GRATS_LEVEL = {
   "Gz on {level}, {name}!",
   "Grats on level {level}, {name}!",
-  "Gz on lvl {level}, {name} Hurry up and get to max level...",
-  "GZ on {level}, {name}, chop chop, gotta make it to raid night..",
 }
 local GRATS_MAX_LEVEL = {
-  "Gz on {level}, {name}! Welcome to the endgame!",
-  "GZ on {level}, {name}! Now you can finally play the game! :kek:",
+  "Gz on {level}, {name}!",
+  "Grats on level {level}, {name}!",
 }
 local GRATS_PROF = {
   "Gz on 300 {prof}, {name}!",
