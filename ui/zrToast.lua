@@ -103,9 +103,11 @@ local function CreateToast()
   t.EmblemIcon = t:CreateTexture(nil, "ARTWORK")
   t.EmblemIcon:SetSize(31, 35)
   t.EmblemIcon:SetPoint("CENTER", t, "LEFT", 32, 0)
-  t.Icon = t:CreateTexture(nil, "ARTWORK", nil, 1)
-  t.Icon:SetSize(26, 26)
-  t.Icon:SetPoint("CENTER", t, "LEFT", 32, 0)
+  t.IconBg = t:CreateTexture(nil, "ARTWORK", nil, -1)
+  t.IconBg:SetColorTexture(0, 0, 0, 1)
+  t.IconBg:SetAllPoints(t.EmblemBackground)
+  t.Icon = t:CreateTexture(nil, "ARTWORK")
+  t.Icon:SetAllPoints(t.EmblemBackground)
   t.Title = UI.Text(t, "GameFontNormal")
   t.Title:SetPoint("LEFT", 66, 9)
   t.Title:SetWidth(132)
@@ -171,7 +173,7 @@ local function CreateToast()
   return t
 end
 
-local function SetEmblem(t, icon)
+local function SetEmblem(t, icon, atlas)
   t.EmblemBackground:SetTexture(ART)
   t.EmblemBackground:SetTexCoord(0.06054688, 0.13281250, 0.00390625, 0.14453125)
   t.EmblemBackground:SetVertexColor(1, 1, 1)
@@ -179,8 +181,15 @@ local function SetEmblem(t, icon)
   t.EmblemBorder:SetTexCoord(0.06054688, 0.13281250, 0.15234375, 0.29296875)
   t.EmblemBorder:SetVertexColor(1, 1, 1)
   t.EmblemIcon:SetTexture(nil)
-  t.Icon:SetShown(icon ~= nil)
-  if icon then
+  local custom = icon ~= nil or atlas ~= nil
+  -- The tabard ring is white until tinted with guild colours, so a custom icon fills its space instead.
+  t.EmblemBackground:SetShown(not custom)
+  t.EmblemBorder:SetShown(not custom)
+  t.Icon:SetShown(custom)
+  t.IconBg:SetShown(custom)
+  if atlas then
+    t.Icon:SetAtlas(atlas)
+  elseif icon then
     t.Icon:SetTexture(icon)
     t.Icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
   elseif SetLargeGuildTabardTextures then
@@ -188,14 +197,14 @@ local function SetEmblem(t, icon)
   end
 end
 
--- data: title, text, optional icon (else the guild tabard), optional button = { label, onClick(button) }.
+-- data: title, text, optional icon or atlas (else the guild tabard), optional button = { label, onClick(button) }.
 function UI.Toast(data)
   if #shown >= MAX_SHOWN then
     waiting[#waiting + 1] = data
     return
   end
   local t = table.remove(pool) or CreateToast()
-  SetEmblem(t, data.icon)
+  SetEmblem(t, data.icon, data.atlas)
   t.Title:SetText(data.title or "")
   t.Text:SetText(data.text or "")
   local b = data.button
@@ -234,8 +243,14 @@ local function Grats(d)
   end
 end
 
+local function ClassAtlas(class)
+  return class and ("classicon-" .. class:lower()) or nil
+end
+
 ZR.On("Ding", function(d)
+  local info = not d.class and ZR.RosterInfo(d.name)
   UI.Toast({
+    atlas = ClassAtlas(d.class or (info and info.classFile)),
     title = ZR.ColorName(d.name, d.class),
     text = ZR.Dings.Text(d),
     button = { label = "Grats", onClick = Grats(d) },
@@ -246,6 +261,7 @@ end)
 function UI.PreviewDing()
   local _, class = UnitClass("player")
   UI.Toast({
+    atlas = ClassAtlas(class),
     title = ZR.ColorName(ZR.PlayerName(), class),
     text = "reached level 42 (preview)",
     button = { label = "Grats", onClick = function(button) button:SetText("Sent!") button:Disable() end },
