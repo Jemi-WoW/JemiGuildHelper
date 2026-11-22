@@ -63,7 +63,14 @@ local function Show(name, kind, value, class)
   local key = name .. "|" .. kind .. "|" .. value
   if shown[key] then return false end
   shown[key] = true
-  if kind == "L" then seenLevel[name] = math.max(seenLevel[name] or 0, value) end
+  if kind == "L" then
+    seenLevel[name] = math.max(seenLevel[name] or 0, value)
+    -- Kept across reloads, so a late message can't bring back a ding already shown.
+    local c = ZR.CharDB()
+    c.dingLevel = c.dingLevel or {}
+    if (c.dingLevel[name] or 0) >= value then return false end
+    c.dingLevel[name] = value
+  end
   if Dings.Enabled() and name ~= ZR.PlayerName() then
     ZR.Fire("Ding", { name = name, kind = kind, value = value, class = class })
   end
