@@ -7,8 +7,9 @@ ZR.Dings = Dings
 local PREFIX = "ZUGZUGDing"
 local PROTO = "1"
 local MAXED = 300
-local ROSTER_EVERY = 60
+local ROSTER_EVERY = 15
 local RETRY_FOR = 120
+local RELAY_JITTER = 2
 
 -- Grats lines, one picked at random: {name} is their first name, {level} the level, {prof} the profession.
 local GRATS_LEVEL = {
@@ -25,6 +26,7 @@ local GRATS_PROF = {
 
 local seenLevel = {}
 local shown = {}
+local relayed = {}
 local pending = {}
 local profsReady = false
 
@@ -56,14 +58,16 @@ function Dings.Text(d)
   return ("reached level %d"):format(d.value)
 end
 
--- The same ding can come from a message and the roster, so it shows once.
+-- The same ding can come from a message and the roster, so it shows once; true when it's new.
 local function Show(name, kind, value, class)
   local key = name .. "|" .. kind .. "|" .. value
-  if shown[key] then return end
+  if shown[key] then return false end
   shown[key] = true
   if kind == "L" then seenLevel[name] = math.max(seenLevel[name] or 0, value) end
-  if not Dings.Enabled() or name == ZR.PlayerName() then return end
-  ZR.Fire("Ding", { name = name, kind = kind, value = value, class = class })
+  if Dings.Enabled() and name ~= ZR.PlayerName() then
+    ZR.Fire("Ding", { name = name, kind = kind, value = value, class = class })
+  end
+  return true
 end
 
 local function Send(msg)
@@ -77,6 +81,20 @@ local function Announce(kind, value)
   local _, class = UnitClass("player")
   local msg = table.concat({ PROTO, kind, value, class or "" }, "|")
   if not Send(msg) then pending[#pending + 1] = { msg = msg, at = GetTime() } end
+end
+
+-- Members without the addon can't announce, so whoever spots it first tells the rest; the random wait lets one speak for all.
+local function Relay(name, level, class)
+  local key = name .. "|" .. level
+  C_Timer.After(math.random() * RELAY_JITTER, function()
+    if relayed[key] then return end
+    relayed[key] = true
+    Send(table.concat({ PROTO, "R", level, class or "", name }, "|"))
+  end)
+end
+
+local function Spotted(name, level, class)
+  if Show(name, "L", level, class) then Relay(name, level, class) end
 end
 
 local function Retry()
@@ -113,7 +131,7 @@ local function CheckRoster()
         seenLevel[name] = info.level
       elseif info.level > before then
         seenLevel[name] = info.level
-        if info.online then Show(name, "L", info.level, info.classFile) end
+        if info.online then Spotted(name, info.level, info.classFile) end
       end
     end
   end
@@ -122,10 +140,37 @@ end
 local function OnMessage(_, prefix, text, channel, sender)
   if prefix ~= PREFIX or channel ~= "GUILD" then return end
   if ZR.IsSecret(text) or ZR.IsSecret(sender) then return end
-  local proto, kind, value, class = strsplit("|", text)
+  local proto, kind, value, class, about = strsplit("|", text)
   value = tonumber(value)
-  if proto ~= PROTO or not value or (kind ~= "L" and kind ~= "P") then return end
-  Show(ZR.StripRealm(sender), kind, value, class ~= "" and class or nil)
+  if proto ~= PROTO or not value then return end
+  class = class ~= "" and class or nil
+  if kind == "R" then
+    if not about or not ZR.IsGuildMember(about) or value <= (seenLevel[about] or 0) or value > ZR.MaxLevel() then return end
+    relayed[about .. "|" .. value] = true
+    Show(about, "L", value, class)
+  elseif kind == "L" or kind == "P" then
+    sender = ZR.StripRealm(sender)
+    if kind == "L" then relayed[sender .. "|" .. value] = true end
+    Show(sender, kind, value, class)
+  end
+end
+
+-- Grouped or nearby guildies level in front of us, long before the roster catches up.
+local function OnUnitLevel(_, unit)
+  if type(unit) ~= "string" then return end
+  local isPlayer = UnitIsPlayer(unit)
+  if ZR.IsSecret(isPlayer) or not isPlayer then return end
+  local name, realm = UnitName(unit)
+  local level = UnitLevel(unit)
+  if ZR.IsSecret(name) or ZR.IsSecret(realm) or ZR.IsSecret(level) or type(level) ~= "number" then return end
+  if not name or (realm and realm ~= "") or name == ZR.PlayerName() or not ZR.IsGuildMember(name) then return end
+  local before = seenLevel[name]
+  if before and level > before then
+    local _, class = UnitClass(unit)
+    Spotted(name, level, not ZR.IsSecret(class) and class or nil)
+  elseif not before then
+    seenLevel[name] = level
+  end
 end
 
 function Dings.Init()
@@ -148,4 +193,5 @@ ZR.RegisterEvent("SKILL_LINES_CHANGED", function()
   if profsReady then CheckProfessions() end
 end)
 ZR.On("RosterChanged", CheckRoster)
+ZR.RegisterEvent("UNIT_LEVEL", OnUnitLevel)
 ZR.RegisterEvent("PLAYER_GUILD_UPDATE", function() wipe(seenLevel) end)

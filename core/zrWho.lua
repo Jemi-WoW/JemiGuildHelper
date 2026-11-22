@@ -15,6 +15,7 @@ Who.state = "idle"
 Who.lastSend = 0
 Who.lastQuery = nil
 Who.params = nil
+Who.skip = {}
 
 local pending
 
@@ -43,14 +44,21 @@ function Who.Reset()
   Who.state = "idle"
   Who.lastQuery = nil
   Who.params = nil
+  wipe(Who.skip)
   ZR.Fire("WhoChanged")
 end
 
--- Seeds a fresh scan; className is localized or nil for all classes.
-function Who.Start(minLevel, maxLevel, className)
+-- Seeds a fresh scan; classNames are localized, empty for all classes; skipFiles are class files left out.
+function Who.Start(minLevel, maxLevel, classNames, skipFiles)
   Who.Reset()
-  Who.params = { min = minLevel, max = maxLevel, class = className }
-  Who.queue[1] = { min = minLevel, max = maxLevel, class = className }
+  classNames, skipFiles = classNames or {}, skipFiles or {}
+  for _, file in ipairs(skipFiles) do Who.skip[file] = true end
+  Who.params = { min = minLevel, max = maxLevel, classes = table.concat(classNames, ","), skip = table.concat(skipFiles, ",") }
+  if #classNames == 0 then
+    Who.queue[1] = { min = minLevel, max = maxLevel }
+  else
+    for i, name in ipairs(classNames) do Who.queue[i] = { min = minLevel, max = maxLevel, class = name } end
+  end
   Who.state = "ready"
   ZR.Fire("WhoChanged")
 end
@@ -120,16 +128,15 @@ local function Split(q, num, total)
     end
   elseif not q.class then
     for _, c in ipairs(ZR.ClassList()) do
-      children[#children + 1] = { min = q.min, max = q.max, class = c.name }
+      if not Who.skip[c.file] then children[#children + 1] = { min = q.min, max = q.max, class = c.name } end
     end
   elseif not q.race then
     for _, race in ipairs(ZR.RaceList()) do
       children[#children + 1] = { min = q.min, max = q.max, class = q.class, race = race }
     end
   end
-  for i = #children, 1, -1 do
-    table.insert(Who.queue, 1, children[i])
-  end
+  -- Narrower searches wait at the back, so every level and class gets a first look before any is split further.
+  for _, child in ipairs(children) do Who.queue[#Who.queue + 1] = child end
   return #children > 0
 end
 
@@ -140,7 +147,7 @@ local function Collect()
   for i = 1, num do
     local w = C_FriendList.GetWhoInfo(i)
     local name = w and w.fullName
-    if name and not ZR.IsSecret(name) and name ~= me then
+    if name and not ZR.IsSecret(name) and name ~= me and not Who.skip[w.filename or ""] then
       if (w.fullGuildName and w.fullGuildName ~= "") or ZR.IsGuildMember(name) then
         if not Who.guilded[name] then
           Who.guilded[name] = true

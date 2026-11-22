@@ -24,6 +24,20 @@ local function ScanSettings()
   return db.scan
 end
 
+local function SelectedClasses()
+  local s = ScanSettings()
+  -- Older versions saved a single class.
+  if s.class then s.classes, s.class = { [s.class] = true }, nil end
+  s.classes = s.classes or {}
+  return s.classes
+end
+
+local function SkippedClasses()
+  local s = ScanSettings()
+  s.skip = s.skip or {}
+  return s.skip
+end
+
 local function ReadParams()
   local s = ScanSettings()
   local minL, maxL = s.min or 1, s.max or ZR.MaxLevel()
@@ -35,22 +49,39 @@ local function ReadParams()
   minL = math.max(1, math.min(minL, ZR.MaxLevel()))
   maxL = math.max(minL, math.min(maxL, ZR.MaxLevel()))
   s.min, s.max = minL, maxL
-  local class = s.class and ZR.ClassByFile(s.class)
-  return minL, maxL, class and class.name or nil
+  local picked, skipped = SelectedClasses(), SkippedClasses()
+  local names, skip, left = {}, {}, {}
+  for _, c in ipairs(ZR.ClassList()) do
+    if skipped[c.file] then
+      skip[#skip + 1] = c.file
+    else
+      left[#left + 1] = c.name
+      if picked[c.file] then names[#names + 1] = c.name end
+    end
+  end
+  -- With only skips, a few classes left are cheaper searched one by one than filtered out of everyone.
+  if #names == 0 and #skip > 0 and #left <= 3 then names = left end
+  -- Every class ticked is the same as none, and one search covers that.
+  if #names == #ZR.ClassList() then names = {} end
+  return minL, maxL, names, skip
 end
 
-local function ParamsChanged(minL, maxL, className)
+local function ParamsChanged(minL, maxL, classNames, skip)
   local p = Who.params
-  return not p or p.min ~= minL or p.max ~= maxL or p.class ~= className
+  return not p or p.min ~= minL or p.max ~= maxL or p.classes ~= table.concat(classNames, ",") or p.skip ~= table.concat(skip, ",")
 end
 
 -- One /who per click; key bindings count as clicks too.
 local function Scan()
   if not ZR.IsRecruiter() then return end
-  local minL, maxL, className = ReadParams()
-  if Who.state == "idle" or Who.state == "done" or ParamsChanged(minL, maxL, className) then
+  local minL, maxL, classNames, skip = ReadParams()
+  if #skip == #ZR.ClassList() then
+    UIErrorsFrame:AddExternalErrorMessage("Every class is skipped.")
+    return
+  end
+  if Who.state == "idle" or Who.state == "done" or ParamsChanged(minL, maxL, classNames, skip) then
     if Who.state == "waiting" then return end
-    Who.Start(minL, maxL, className)
+    Who.Start(minL, maxL, classNames, skip)
   end
   local ok, reason = Who.Next()
   if not ok then UIErrorsFrame:AddExternalErrorMessage(reason) end
@@ -245,7 +276,7 @@ local function UpdateScanState()
       end
     else
       label = "Scan"
-      text = "Pick levels and a class, then click Scan."
+      text = "Pick levels and classes, then click Scan."
     end
     if ready > 0 then
       b:SetText(("%s (%d)"):format(label, math.ceil(ready)))
@@ -258,19 +289,70 @@ local function UpdateScanState()
   view.Progress:SetText(text)
 end
 
+local function ClassText()
+  local picked, skipped, names, skips = SelectedClasses(), SkippedClasses(), {}, {}
+  for _, c in ipairs(ZR.ClassList()) do
+    local colored = ZR.ColorName(c.name, c.file)
+    if picked[c.file] then names[#names + 1] = colored end
+    if skipped[c.file] then skips[#skips + 1] = colored end
+  end
+  if #names > 0 and #names < #ZR.ClassList() then
+    if #names <= 2 then return table.concat(names, ", ") end
+    return ("%d classes"):format(#names)
+  end
+  if #skips == 0 then return "All classes" end
+  if #skips == 1 then return "All but " .. skips[1] end
+  return ("All but %d classes"):format(#skips)
+end
+
+local SKIP_ICON = "Interface\\RaidFrame\\ReadyCheck-NotReady"
+
+-- Red cross over the box of a skipped class; attached textures are released when the menu reuses the button.
+local function MarkSkipped(button)
+  local x = button.AttachTexture and button:AttachTexture()
+  if not x then return end
+  x:SetTexture(SKIP_ICON)
+  x:SetSize(14, 14)
+  x:SetDrawLayer("OVERLAY", 7)
+  local box = button.leftTexture1
+  if box then x:SetPoint("CENTER", box, "CENTER") else x:SetPoint("LEFT", 2, 0) end
+end
+
 local function SetupClassDropdown(dd)
-  local s = ScanSettings()
+  local function Changed()
+    if dd.Text then dd.Text:SetText(ClassText()) end
+  end
+  if dd.SetSelectionText then dd:SetSelectionText(ClassText) end
   dd:SetupMenu(function(_, root)
-    root:CreateRadio("All classes", function() return s.class == nil end, function()
-      s.class = nil
+    local picked, skipped = SelectedClasses(), SkippedClasses()
+    if root.CreateTitle then root:CreateTitle("Right-click a class to skip it") end
+    root:CreateRadio("All classes", function() return next(picked) == nil and next(skipped) == nil end, function()
+      wipe(picked)
+      wipe(skipped)
+      Changed()
     end)
+    -- Ticking keeps the menu open so several classes can be picked in one go.
     for _, c in ipairs(ZR.ClassList()) do
       local label = UI.ClassIcon(c.file, 14) .. " " .. ZR.ColorName(c.name, c.file)
-      root:CreateRadio(label, function() return s.class == c.file end, function()
-        s.class = c.file
+      local box = root:CreateCheckbox(label, function() return picked[c.file] == true end, function(_, input)
+        -- Left-click picks, right-click skips; doing one undoes the other.
+        if input and input.buttonName == "RightButton" then
+          skipped[c.file] = not skipped[c.file] or nil
+          picked[c.file] = nil
+        else
+          picked[c.file] = not picked[c.file] or nil
+          skipped[c.file] = nil
+        end
+        Changed()
+        return MenuResponse and MenuResponse.Refresh
+      end)
+      box:AddInitializer(function(button)
+        button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        if skipped[c.file] then MarkSkipped(button) end
       end)
     end
   end)
+  Changed()
 end
 
 function UI.BuildFastInvite(parent, inset)
@@ -321,7 +403,7 @@ function UI.BuildFastInvite(parent, inset)
   view.ScanButton:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -3, 3)
   view.ScanButton:SetScript("OnClick", Scan)
   UI.SetButtonTooltip(view.ScanButton, function()
-    return "Scan", "Each click sends one /who. Big ranges split into more searches so nobody is lost to the 50 player cap."
+    return "Scan", "Each click sends one /who. When a search hits the 50 player cap it splits into smaller ones, and every level and class gets searched once before any is narrowed further."
   end)
 
   view.ClearButton = UI.CreateButton(view, "Clear", 90, 20)
