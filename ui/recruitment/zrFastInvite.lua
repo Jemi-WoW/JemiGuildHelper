@@ -403,7 +403,7 @@ function UI.BuildFastInvite(parent, inset)
   view.ScanButton:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -3, 3)
   view.ScanButton:SetScript("OnClick", Scan)
   UI.SetButtonTooltip(view.ScanButton, function()
-    return "Scan", "Each click sends one /who. When a search hits the 50 player cap it splits into smaller ones, and every level and class gets searched once before any is narrowed further."
+    return "Scan", "Each click sends one /who for a small level range, in random order, so every scan starts on different players. A search that hits the 50 player cap splits into smaller ones."
   end)
 
   view.ClearButton = UI.CreateButton(view, "Clear", 90, 20)

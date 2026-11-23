@@ -29,12 +29,13 @@ local function DataObject()
     icon = ZR.ICON_TEXTURE,
     label = ZR.TITLE,
     OnClick = function(_, button)
-      if button == "LeftButton" or button == "RightButton" then ZR.TogglePage() end
+      if button == "LeftButton" then ZR.TogglePage() elseif button == "RightButton" then ZR.Options.Open() end
     end,
     OnTooltipShow = function(tt)
       if not tt or not tt.AddLine then return end
       tt:AddLine(ZR.TITLE, 1, 0.82, 0)
-      tt:AddLine("Click: open where you left off", 1, 1, 1)
+      tt:AddLine("Left-click: open addon", 1, 1, 1)
+      tt:AddLine("Right-click: settings", 1, 1, 1)
       tt:AddLine("Drag: move icon", 1, 1, 1)
       local unread = ZR.IsRecruiter() and ZR.Inbox.Unread() or 0
       if unread > 0 then

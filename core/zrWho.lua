@@ -6,6 +6,7 @@ ZR.Who = Who
 Who.COOLDOWN = 8
 local TIMEOUT = 10
 local CAP = 50
+local RECENT = 20 * 60
 
 Who.queue = {}
 Who.results = {}
@@ -16,8 +17,10 @@ Who.lastSend = 0
 Who.lastQuery = nil
 Who.params = nil
 Who.skip = {}
+-- Answers by query text, kept across scans: { at, num, total, found }.
+Who.searched = {}
 
-local pending
+local pending, Split
 
 local function QueryText(q)
   local parts = {}
@@ -48,17 +51,32 @@ function Who.Reset()
   ZR.Fire("WhoChanged")
 end
 
+-- Levels per starting search; a wide search keeps hitting the same first 50 the server finds.
+local SEED_SPAN = 5
+
+local function Shuffle(t)
+  for i = #t, 2, -1 do
+    local j = math.random(i)
+    t[i], t[j] = t[j], t[i]
+  end
+  return t
+end
+
 -- Seeds a fresh scan; classNames are localized, empty for all classes; skipFiles are class files left out.
 function Who.Start(minLevel, maxLevel, classNames, skipFiles)
   Who.Reset()
   classNames, skipFiles = classNames or {}, skipFiles or {}
   for _, file in ipairs(skipFiles) do Who.skip[file] = true end
   Who.params = { min = minLevel, max = maxLevel, classes = table.concat(classNames, ","), skip = table.concat(skipFiles, ",") }
-  if #classNames == 0 then
-    Who.queue[1] = { min = minLevel, max = maxLevel }
-  else
-    for i, name in ipairs(classNames) do Who.queue[i] = { min = minLevel, max = maxLevel, class = name } end
+  local classes = #classNames > 0 and classNames or { false }
+  for lo = minLevel, maxLevel, SEED_SPAN do
+    local hi = math.min(maxLevel, lo + SEED_SPAN - 1)
+    for _, name in ipairs(classes) do
+      Who.queue[#Who.queue + 1] = { min = lo, max = hi, class = name or nil }
+    end
   end
+  -- Random order, so each new scan starts on different players.
+  Shuffle(Who.queue)
   Who.state = "ready"
   ZR.Fire("WhoChanged")
 end
@@ -77,13 +95,37 @@ local function Restore()
   pending = nil
 end
 
+local function Capped(num, total)
+  -- Forever reports the total as the capped count, so a full page means more exist.
+  return num >= CAP - 1 or total > num
+end
+
+-- A search answered a moment ago is reused, so a new scan goes deeper instead of seeing the same players again.
+local function TakeNext()
+  local q = table.remove(Who.queue, 1)
+  while q do
+    local seen = Who.searched[QueryText(q)]
+    if not seen or GetTime() - seen.at > RECENT then return q end
+    for _, r in ipairs(seen.found) do
+      if not ZR.IsGuildMember(r.name) and not Who.skip[r.classFile or ""] then Who.results[r.name] = r end
+    end
+    if Capped(seen.num, seen.total) then Split(q, seen.num, seen.total) end
+    q = table.remove(Who.queue, 1)
+  end
+end
+
 -- Must run inside a click or key press.
 function Who.Next()
   if pending then return false, "Waiting for the last /who" end
   if ZR.WhoDisabled() then return false, "/who is disabled here" end
   if Who.ReadyIn() > 0 then return false, "Cooldown" end
-  local q = table.remove(Who.queue, 1)
-  if not q then return false, "Nothing queued" end
+  local had = #Who.queue > 0
+  local q = TakeNext()
+  if not q then
+    Who.state = "done"
+    ZR.Fire("WhoChanged")
+    return false, had and "All of this was searched in the last 20 minutes" or "Nothing queued"
+  end
 
   -- Forever's Group Finder pops open on every who result unless muted.
   if LFGWhoListFrame and not LFGWhoListFrame:IsShown() then
@@ -112,7 +154,7 @@ end
 
 local DEFAULT_SPLIT = 4
 
-local function Split(q, num, total)
+function Split(q, num, total)
   local children = {}
   if q.max > q.min then
     local span = q.max - q.min + 1
@@ -136,7 +178,7 @@ local function Split(q, num, total)
     end
   end
   -- Narrower searches wait at the back, so every level and class gets a first look before any is split further.
-  for _, child in ipairs(children) do Who.queue[#Who.queue + 1] = child end
+  for _, child in ipairs(Shuffle(children)) do Who.queue[#Who.queue + 1] = child end
   return #children > 0
 end
 
@@ -144,6 +186,7 @@ local function Collect()
   local me = ZR.PlayerName()
   local num, total = C_FriendList.GetNumWhoResults()
   num, total = num or 0, total or 0
+  local found = {}
   for i = 1, num do
     local w = C_FriendList.GetWhoInfo(i)
     local name = w and w.fullName
@@ -155,7 +198,7 @@ local function Collect()
         end
         Who.results[name] = nil
       else
-        Who.results[name] = {
+        local r = {
           name = name,
           level = w.level or 0,
           class = w.classStr or "",
@@ -164,10 +207,12 @@ local function Collect()
           zone = w.area or "",
           seen = ZR.Now(),
         }
+        Who.results[name] = r
+        found[#found + 1] = r
       end
     end
   end
-  return num, total
+  return num, total, found
 end
 
 ZR.RegisterEvent("WHO_LIST_UPDATE", function()
@@ -176,9 +221,9 @@ ZR.RegisterEvent("WHO_LIST_UPDATE", function()
   Restore()
   Who.timedOut = nil
   Who.stats.queries = Who.stats.queries + 1
-  local num, total = Collect()
-  -- Forever reports the total as the capped count, so a full page means more exist.
-  if num >= CAP - 1 or total > num then
+  local num, total, found = Collect()
+  Who.searched[QueryText(q)] = { at = GetTime(), num = num, total = total, found = found }
+  if Capped(num, total) then
     if not Split(q, num, total) then
       Who.stats.truncated = Who.stats.truncated + 1
     end

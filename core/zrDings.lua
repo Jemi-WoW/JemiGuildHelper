@@ -38,6 +38,13 @@ function Dings.SetEnabled(on)
   ZR.DB().dings = on
 end
 
+Dings.MIN_LEVEL = 15
+
+-- Level-ups below this stay quiet; professions always show.
+function Dings.MinLevel()
+  return ZR.DB().dingMinLevel or Dings.MIN_LEVEL
+end
+
 local function FirstName(name)
   return name:match("^(%S+)") or name
 end
@@ -71,7 +78,7 @@ local function Show(name, kind, value, class)
     if (c.dingLevel[name] or 0) >= value then return false end
     c.dingLevel[name] = value
   end
-  if Dings.Enabled() and name ~= ZR.PlayerName() then
+  if Dings.Enabled() and name ~= ZR.PlayerName() and (kind ~= "L" or value >= Dings.MinLevel()) then
     ZR.Fire("Ding", { name = name, kind = kind, value = value, class = class })
   end
   return true
