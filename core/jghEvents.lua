@@ -13,6 +13,7 @@ end
 
 JGH.RegisterEvent("ADDON_LOADED", function(_, name)
   if name ~= JGH.ADDON then return end
+  JGH.ImportOldDB()
   JGH.InitDB()
 end)
 
@@ -30,6 +31,7 @@ JGH.RegisterEvent("PLAYER_LOGIN", function()
   JGH.RequestRoster()
   JGH.CheckOfficer()
   CheckGuildReady()
+  JGH.RetireOldAddOn()
 end)
 
 JGH.RegisterEvent("GUILD_ROSTER_UPDATE", CheckGuildReady)

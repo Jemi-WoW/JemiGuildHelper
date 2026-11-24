@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: <|cff00ff00Jemi Guild Helper|r> Import
+## Notes: Moves your data from the old guild addon into Jemi Guild Helper, then turns itself off.
+## Author: Jamie/Jemi
+## Category: Jemi
+## IconTexture: Interface\AddOns\JemiGuildHelper\externals\img\JemiGuildHelperIcon.tga
+## SavedVariables: ZUGZUGRebornDB
+
+Import.lua

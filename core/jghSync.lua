@@ -4,6 +4,8 @@ local Sync = {}
 JGH.Sync = Sync
 
 local PROTO = "1"
+-- Officers still on ZUGZUG Reborn sync here; drop once everyone has updated.
+local OLD_PREFIX = "ZUGZUGReborn"
 local BURST = 8
 local MAX_REPLY = 150
 local MAX_QUEUE = 400
@@ -22,7 +24,9 @@ local function Send(msg)
   local ok, result = pcall(C_ChatInfo.SendAddonMessage, JGH.SYNC_PREFIX, msg, "GUILD")
   if not ok then return true end
   -- 3 and 8 are throttles; anything else will not succeed on retry.
-  return result ~= 3 and result ~= 8
+  if result == 3 or result == 8 then return false end
+  pcall(C_ChatInfo.SendAddonMessage, OLD_PREFIX, msg, "GUILD")
+  return true
 end
 
 local function Encode(name, r)
@@ -72,7 +76,7 @@ end
 
 local function OnMessage(_, prefix, text, channel, sender)
   -- Older versions still send on the officer channel.
-  if prefix ~= JGH.SYNC_PREFIX or (channel ~= "GUILD" and channel ~= "OFFICER") then return end
+  if (prefix ~= JGH.SYNC_PREFIX and prefix ~= OLD_PREFIX) or (channel ~= "GUILD" and channel ~= "OFFICER") then return end
   if JGH.IsSecret(text) or JGH.IsSecret(sender) or not Enabled() then return end
   sender = JGH.StripRealm(sender)
   if sender == JGH.PlayerName() then return end
@@ -98,6 +102,7 @@ end
 function Sync.Init()
   if C_ChatInfo.RegisterAddonMessagePrefix then
     C_ChatInfo.RegisterAddonMessagePrefix(JGH.SYNC_PREFIX)
+    C_ChatInfo.RegisterAddonMessagePrefix(OLD_PREFIX)
   end
   JGH.RegisterEvent("CHAT_MSG_ADDON", OnMessage)
   ticker = ticker or C_Timer.NewTicker(1, Pump)
