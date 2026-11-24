@@ -35,6 +35,7 @@ core/jghLoot.lua
 
 ui/jghWidgets.lua
 ui/jghToast.lua
+ui/jghReloadPrompt.lua
 ui/jghGuildFrame.lua
 ui/recruitment/jghRecruitMessage.lua
 ui/recruitment/jghFastInvite.lua

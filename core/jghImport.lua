@@ -3,16 +3,6 @@ local _, JGH = ...
 -- WoW only loads ZUGZUGRebornDB for a folder with this name: the old addon or the import folder that replaces it.
 local OLD_ADDON = "ZUGZUG-Reborn"
 
-StaticPopupDialogs["JEMIGUILDHELPER_RELOAD"] = {
-  text = "Jemi Guild Helper has replaced ZUGZUG Reborn and turned the old version off.\nReload now to finish.",
-  button1 = "Reload",
-  button2 = "Later",
-  OnAccept = ReloadUI,
-  timeout = 0,
-  whileDead = true,
-  hideOnEscape = true,
-}
-
 -- Deep copies what dst lacks from src; dst wins where both have a value.
 local function Fill(dst, src)
   for k, v in pairs(src) do
@@ -39,7 +29,7 @@ function JGH.RetireOldAddOn()
   local ok = pcall(C_AddOns.DisableAddOn, OLD_ADDON)
   if not _G.ZUGZUGReborn then return end
   if ok then
-    StaticPopup_Show("JEMIGUILDHELPER_RELOAD")
+    JGH.UI.ShowReloadPrompt()
   else
     JGH.Msg("Please delete the old ZUGZUG-Reborn folder from Interface\\AddOns.")
   end
