@@ -18,6 +18,8 @@ core/jghCompat.lua
 core/jghCore.lua
 core/jghImport.lua
 core/jghGuild.lua
+core/jghRanks.lua
+core/jghDiscord.lua
 core/jghContacts.lua
 core/jghWho.lua
 core/jghChannels.lua
@@ -53,6 +55,7 @@ ui/jghLootMaster.lua
 ui/jghMinimap.lua
 ui/jghMapPins.lua
 ui/jghSettings.lua
+ui/jghGuildControl.lua
 
 core/jghSlashCommands.lua
 core/jghEvents.lua

@@ -8,16 +8,6 @@ JGH.TITLE = "Jemi Guild Helper"
 JGH.ICON_TEXTURE = "Interface\\AddOns\\" .. ADDON .. "\\externals\\img\\JemiGuildHelperIcon.tga"
 JGH.SYNC_PREFIX = "JemiGuildHelper"
 
--- Discord invites by guild name; other guilds get no Discord button.
-JGH.GUILD_DISCORDS = {
-  ["ZUGZUG Reborn"] = "https://discord.gg/Vg7npmWaxf",
-}
-
-function JGH.GuildDiscord()
-  local guild = GetGuildInfo("player")
-  return guild and JGH.GUILD_DISCORDS[guild], guild
-end
-
 BINDING_HEADER_JEMIGUILDHELPER = "Jemi Guild Helper"
 BINDING_NAME_JEMIGUILDHELPER_SCAN = "Fast Invite: scan next"
 BINDING_NAME_JEMIGUILDHELPER_POST = "Recruit Message: post to next channel"

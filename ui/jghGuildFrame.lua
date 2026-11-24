@@ -204,6 +204,12 @@ function GF.SelectSubTab(f, index)
   if f.selectTab then f.selectTab(index) end
 end
 
+-- Lock texts may be functions, for wording that changes with guild settings.
+local function Resolve(v)
+  if type(v) == "function" then return v() end
+  return v
+end
+
 function GF.SelectFeature(key)
   local f = Feature(key)
   if not f then return end
@@ -218,8 +224,8 @@ function GF.SelectFeature(key)
     end
   end
   page.Title:SetText(f.title)
-  page.Lock.Text:SetText(f.lockText or "")
-  page.Lock.Sub:SetText(f.lockSub or "")
+  page.Lock.Text:SetText(Resolve(f.lockText) or "")
+  page.Lock.Sub:SetText(Resolve(f.lockSub) or "")
   page.Lock:SetShown(not allowed)
   if allowed then
     BuildFeature(f)
@@ -291,9 +297,14 @@ local function BuildSideTab()
   sideTab:Hide()
 end
 
--- Only for guilds with a Discord, and the minimized title bar has no room for it.
+-- Without a link only officers see it, to add one. The minimized title bar has no room for it.
 local function UpdateDiscord()
-  discord:SetShown(JGH.GuildDiscord() ~= nil and cf:GetDisplayMode() ~= COMMUNITIES_FRAME_DISPLAY_MODES.MINIMIZED)
+  if not discord then return end
+  local link = JGH.Discord.Link()
+  local edit = not link and JGH.IsOfficer()
+  discord:SetText(edit and "Edit Discord Link" or "Join Discord")
+  discord:SetWidth(edit and 124 or 100)
+  discord:SetShown((link ~= nil or edit) and cf:GetDisplayMode() ~= COMMUNITIES_FRAME_DISPLAY_MODES.MINIMIZED)
 end
 
 local function BuildDiscordButton()
@@ -301,13 +312,18 @@ local function BuildDiscordButton()
   discord:SetPoint("RIGHT", cf.MaximizeMinimizeFrame, "LEFT", -4, 0)
   -- The title bar art would otherwise cover it.
   discord:SetFrameLevel(cf.MaximizeMinimizeFrame:GetFrameLevel())
-  discord:SetScript("OnClick", function()
+  discord:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  discord:SetScript("OnClick", function(_, button)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    local url, guild = JGH.GuildDiscord()
-    if url then JGH.ShowCopyBox(guild .. " Discord", "Ctrl+C, then paste it in your browser", url) end
+    local link = JGH.Discord.Link()
+    if link and (button ~= "RightButton" or not JGH.IsOfficer()) then
+      JGH.ShowCopyBox((GetGuildInfo("player") or "Guild") .. " Discord", "Ctrl+C, then paste it in your browser", link)
+    elseif JGH.IsOfficer() then
+      UI.OpenGuildControlPage()
+    end
   end)
   UI.SetButtonTooltip(discord, function()
-    return "Join our Discord", "Addons cannot open your browser, so this gives you the link to copy."
+    return JGH.Discord.Link() and "Join our Discord" or "No Discord link yet"
   end)
   UpdateDiscord()
 end
@@ -389,9 +405,15 @@ JGH.RegisterEvent("PLAYER_REGEN_ENABLED", function()
 end)
 
 JGH.On("InboxChanged", GF.RefreshTabLabels)
+JGH.On("DiscordChanged", UpdateDiscord)
 JGH.On("OfficerChanged", function()
+  UpdateDiscord()
   GF.RefreshTabLabels()
   if GF.IsShown() then GF.SelectFeature(currentKey) end
+end)
+-- The lock names the allowed ranks, so it rewords when they change.
+JGH.On("RankAccessChanged", function()
+  if GF.IsShown() and page and page.Lock:IsShown() then GF.SelectFeature(currentKey) end
 end)
 
 function GF.Init()

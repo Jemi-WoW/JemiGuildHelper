@@ -3,9 +3,6 @@ local _, JGH = ...
 local roster = {}
 local lastAccess
 
--- Ranks below officer that may still recruit, matched by name in lower case.
-JGH.RECRUITER_RANKS = { og = true }
-
 function JGH.IsOfficer()
   if not IsInGuild() then return false end
   if IsGuildLeader() then return true end
@@ -13,9 +10,10 @@ function JGH.IsOfficer()
 end
 
 function JGH.IsRecruiter()
-  if JGH.IsOfficer() then return true end
-  local _, rank = GetGuildInfo("player")
-  return type(rank) == "string" and JGH.RECRUITER_RANKS[strtrim(rank):lower()] or false
+  if not IsInGuild() then return false end
+  if IsGuildLeader() then return true end
+  local order = JGH.Ranks.MyOrder()
+  return order ~= nil and JGH.Ranks.CanRecruit(order)
 end
 
 -- The user's own /ginvite fails without the rank's invite right.
@@ -45,13 +43,14 @@ function JGH.RefreshRoster()
   if not GetNumGuildMembers or not GetGuildRosterInfo then return end
   local total, seen = GetNumGuildMembers() or 0, 0
   for i = 1, total do
-    local name, rank, _, level, _, _, _, _, online, _, classFile = GetGuildRosterInfo(i)
+    local name, rank, rankIndex, level, _, _, _, _, online, _, classFile = GetGuildRosterInfo(i)
     if name and not JGH.IsSecret(name) then
       -- Combat can hide these; unknown must not read as offline.
       local known = not JGH.IsSecret(online)
       local info = { classFile = not JGH.IsSecret(classFile) and classFile or nil }
       if known then info.online = online and true or false end
       if not JGH.IsSecret(rank) and type(rank) == "string" then info.rank = rank end
+      if not JGH.IsSecret(rankIndex) and type(rankIndex) == "number" then info.rankIndex = rankIndex end
       if not JGH.IsSecret(level) and type(level) == "number" then info.level = level end
       if known and not online and GetGuildRosterLastOnline then
         local y, mo, d, h = GetGuildRosterLastOnline(i)
