@@ -1,8 +1,8 @@
 ## Interface: 16001
-## Title: <|cff00ff00Jemi Guild Helper|r> v0.6
+## Title: <|cff00ff00Jemi Guild Helper|r> v0.6.1
 ## Notes: Guild recruiting and a guild crafters directory inside the Guild & Communities window - by Jemi
 ## Author: Jamie/Jemi
-## Version: 0.6
+## Version: 0.6.1
 ## Category: Jemi
 ## IconTexture: Interface\AddOns\JemiGuildHelper\externals\img\JemiGuildHelperIcon.tga
 ## SavedVariables: JemiGuildHelperDB
