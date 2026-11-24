@@ -1,8 +1,8 @@
 <Bindings>
-	<Binding name="ZUGZUGREBORN_SCAN" header="ZUGZUGREBORN" category="ADDONS">
-		ZUGZUGReborn.BindingScan()
+	<Binding name="JEMIGUILDHELPER_SCAN" header="JEMIGUILDHELPER" category="ADDONS">
+		JemiGuildHelper.BindingScan()
 	</Binding>
-	<Binding name="ZUGZUGREBORN_POST" category="ADDONS">
-		ZUGZUGReborn.BindingPost()
+	<Binding name="JEMIGUILDHELPER_POST" category="ADDONS">
+		JemiGuildHelper.BindingPost()
 	</Binding>
 </Bindings>

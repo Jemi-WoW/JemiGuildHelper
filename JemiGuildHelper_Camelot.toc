@@ -1,0 +1,56 @@
+## Interface: 16001
+## Title: <|cff00ff00Jemi Guild Helper|r> v0.6
+## Notes: Guild recruiting and a guild crafters directory inside the Guild & Communities window - by Jemi
+## Author: Jamie/Jemi
+## Version: 0.6
+## Category: Jemi
+## IconTexture: Interface\AddOns\JemiGuildHelper\externals\img\JemiGuildHelperIcon.tga
+## SavedVariables: JemiGuildHelperDB
+## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0
+## X-Embeds: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0
+
+Libs/LibStub/LibStub.lua
+Libs/CallbackHandler-1.0/CallbackHandler-1.0.lua
+Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua
+Libs/LibDBIcon-1.0/LibDBIcon-1.0.lua
+
+core/jghCompat.lua
+core/jghCore.lua
+core/jghGuild.lua
+core/jghContacts.lua
+core/jghWho.lua
+core/jghChannels.lua
+core/jghInvite.lua
+core/jghInbox.lua
+core/jghSync.lua
+core/jghItemCategories.lua
+core/jghCrafts.lua
+core/jghCraftSync.lua
+core/jghMapSync.lua
+core/jghDings.lua
+core/jghRaids.lua
+core/jghRaidLoot.lua
+core/jghLoot.lua
+
+ui/jghWidgets.lua
+ui/jghToast.lua
+ui/jghGuildFrame.lua
+ui/recruitment/jghRecruitMessage.lua
+ui/recruitment/jghFastInvite.lua
+ui/recruitment/jghWhispers.lua
+ui/jghPanels_Recruitment.lua
+ui/crafters/jghCategoryList.lua
+ui/crafters/jghCrafters.lua
+ui/jghPanels_Crafters.lua
+ui/raids/jghItemPicker.lua
+ui/raids/jghRaidEditor.lua
+ui/raids/jghRaids.lua
+ui/jghPanels_Raids.lua
+ui/jghRollFrame.lua
+ui/jghLootMaster.lua
+ui/jghMinimap.lua
+ui/jghMapPins.lua
+ui/jghSettings.lua
+
+core/jghSlashCommands.lua
+core/jghEvents.lua

@@ -1,4 +1,4 @@
-# ZUGZUG Reborn
+# Jemi Guild Helper
 
 Guild recruiting and a guild crafters directory, built right into the Guild & Communities window.
 
@@ -25,6 +25,6 @@ Runs on **WoW Forever**.
 
 Click the minimap icon, or open the guild window with `J` and pick the peon tab. It opens where you left off.
 
-`/zr help` lists the rest.
+`/jgh help` lists the rest.
 
 Made with love by **Jemi** <3
