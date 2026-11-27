@@ -9,8 +9,8 @@ local MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 local TAXI = { Horde = 132268, Alliance = 132239 }
 local FALLBACK = { r = 0.2, g = 1, b = 0.4 }
 local CLUSTER = { r = 1, g = 0.82, b = 0 }
-local BADGE = 10
-local LIFT = 16
+local BADGE = 14
+local LIFT = 20
 local ROW = 5
 local MAX_INSIDE = 10
 local SKULL = "Interface\\TargetingFrame\\UI-TargetingFrame-Skull"
@@ -351,10 +351,13 @@ local function Cluster(points, size)
   return groups
 end
 
--- Members in one dungeon line up above its entrance, closest row first, instead of merging into one pin.
+-- Members inside line up above their entrance, closest row first, instead of merging into one pin.
 local function InsideSlots(group, scale, out)
   local list = group.list
-  table.sort(list, function(a, b) return a.name < b.name end)
+  table.sort(list, function(a, b)
+    if a.instance.name ~= b.instance.name then return a.instance.name < b.instance.name end
+    return a.name < b.name
+  end)
   local items = {}
   for i = 1, math.min(#list, MAX_INSIDE) do items[i] = { list[i] } end
   if #list > MAX_INSIDE then
@@ -362,8 +365,8 @@ local function InsideSlots(group, scale, out)
     for i = MAX_INSIDE, #list do rest[#rest + 1] = list[i] end
     items[MAX_INSIDE] = rest
   end
-  local ex, ey = group.x / #list, group.y / #list
-  local step, lift = (SIZE + 2) / scale, LIFT / scale
+  local ex, ey = group.x, group.y
+  local step, lift = (SIZE + 5) / scale, LIFT / scale
   for i, item in ipairs(items) do
     local row = math.floor((i - 1) / ROW)
     local inRow = math.min(ROW, #items - row * ROW)
@@ -431,19 +434,13 @@ local function Draw()
         local x, y = Project(m.mapID, mapID, px, py)
         if x and x >= 0 and x <= 1 and y >= 0 and y <= 1 then
           x, y = width * x, height * y
-          if m.instance then
-            local g = inside[m.instance.id] or { list = {}, x = 0, y = 0 }
-            inside[m.instance.id] = g
-            g.list[#g.list + 1] = m
-            g.x, g.y = g.x + x, g.y + y
-          else
-            points[#points + 1] = { m = m, x = x, y = y }
-          end
+          table.insert(m.instance and inside or points, { m = m, x = x, y = y })
         end
       end
     end
     local slots = Cluster(points, SIZE / scale)
-    for _, g in pairs(inside) do InsideSlots(g, scale, slots) end
+    -- Entrances this close share one stack, like the ones inside Blackrock Mountain.
+    for _, g in ipairs(Cluster(inside, 2 * SIZE / scale)) do InsideSlots(g, scale, slots) end
     local level = PinLevel(canvas)
     for _, g in ipairs(slots) do
       count = count + 1
@@ -532,8 +529,11 @@ local function ButtonTooltip(self)
   GameTooltip_SetTitle(GameTooltip, JGH.TITLE)
   GameTooltip:AddDoubleLine("Guild members", on and "Shown" or "Hidden", 1, 1, 1,
     on and 0.2 or 1, on and 1 or 0.3, on and 0.2 or 0.3)
+  local count = 0
+  for _ in pairs(Map.Active()) do count = count + 1 end
+  GameTooltip:AddDoubleLine("Sharing their spot", count, 1, 1, 1, 1, 1, 1)
   GameTooltip:AddLine(on and "Click to hide them." or "Click to show them.", 0.6, 0.6, 0.6)
-  if Map.Sharing() then GameTooltip:AddLine("Guild members still see you either way.", 0.6, 0.6, 0.6) end
+  GameTooltip:AddLine("Guild members still see you either way.", 0.6, 0.6, 0.6)
   GameTooltip:Show()
 end
 
@@ -634,20 +634,10 @@ local function MinimapRadius()
   return (sizes[Minimap:GetZoom()] or sizes[0]) / 2
 end
 
-local vec = CreateVector2D and CreateVector2D(0, 0)
-
--- World yards, which work across zone borders: x points north, y points west.
-local function WorldPos(mapID, x, y)
-  if not vec or not C_Map.GetWorldPosFromMapPos then return end
-  vec:SetXY(x, y)
-  local ok, continent, pos = pcall(C_Map.GetWorldPosFromMapPos, mapID, vec)
-  if ok and continent and pos then return continent, pos.x, pos.y end
-end
-
 local function MemberWorld(m, x, y)
   if m.worldX ~= x or m.worldY ~= y then
     m.worldX, m.worldY = x, y
-    m.continent, m.north, m.west = WorldPos(m.mapID, x, y)
+    m.continent, m.north, m.west = Map.WorldPos(m.mapID, x, y)
   end
   return m.continent, m.north, m.west
 end
@@ -656,7 +646,7 @@ local function DrawMinimap()
   local count = 0
   local mapID, x, y = Map.OwnPosition()
   local continent, north, west
-  if mapID and Map.Showing() and Map.MinimapShowing() then continent, north, west = WorldPos(mapID, x, y) end
+  if mapID and Map.Showing() and Map.MinimapShowing() then continent, north, west = Map.WorldPos(mapID, x, y) end
   if continent then
     local half = Minimap:GetWidth() / 2
     local perYard = half / MinimapRadius()

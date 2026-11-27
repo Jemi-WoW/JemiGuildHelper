@@ -15,7 +15,6 @@ local function PrintHelp()
   JGH.Msg("  |cffffd100/jgh dings on|r or |cffffd100off|r - guild level-up popups (|cffffd100preview|r to place them, |cffffd100reset|r to move them back)")
   JGH.Msg("  |cffffd100/jgh minimap|r - show or hide the minimap icon")
   JGH.Msg("  |cffffd100/jgh map on|r or |cffffd100off|r - guild members on the world map")
-  JGH.Msg("  |cffffd100/jgh map share on|r or |cffffd100off|r - share your own position with the guild")
   JGH.Msg("  |cffffd100/jgh map minimap on|r or |cffffd100off|r - guild members on the minimap")
   JGH.Msg("  |cffffd100/jgh invite chat|r or |cffffd100copy|r - how Invite hands you /ginvite")
   JGH.Msg("  |cffffd100/jgh sync on|r or |cffffd100off|r - share contacts with other officers")
@@ -105,16 +104,14 @@ SlashCmdList["JEMIGUILDHELPER"] = function(msg)
     if not which then value = arg end
     if value == "on" or value == "off" then
       local on = value == "on"
-      if which == "share" then
-        JGH.Map.SetSharing(on)
-      elseif which == "minimap" then
+      if which == "minimap" then
         JGH.Map.SetMinimap(on)
       elseif not which then
         JGH.Map.SetShowing(on)
       end
     end
-    JGH.Msg(("Guild members on the map: %s. On the minimap: %s. Sharing your position: %s."):format(
-      JGH.Map.Showing() and "on" or "off", JGH.Map.MinimapShowing() and "on" or "off", JGH.Map.Sharing() and "on" or "off"))
+    JGH.Msg(("Guild members on the map: %s. On the minimap: %s."):format(
+      JGH.Map.Showing() and "on" or "off", JGH.Map.MinimapShowing() and "on" or "off"))
     return
   end
 

@@ -18,7 +18,6 @@ local DEFAULTS = {
   inviteMode = "copy",
   sync = true,
   mapPins = true,
-  mapShare = true,
 }
 
 local DEFAULT_MESSAGE = "<%s> is recruiting! Friendly guild for leveling, dungeons and raids. Whisper me for an invite!"

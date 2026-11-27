@@ -16,17 +16,15 @@ local WALKED_IN = 3
 local GLIDE = SEND_EVERY
 local JUMP = 0.2
 local SUMMON_WINDOW = 130
+local ANSWER_COOLDOWN = 10
 
 Map.members = {}
 local last, lastOut = {}, {}
-local inside, leftAt, summonAt, journal, played, muted
+local inside, leftAt, summonAt, doors, doorsTriedAt, played, muted
+local answerAt, answerTimer
 
 function Map.Showing()
   return JGH.DB().mapPins ~= false
-end
-
-function Map.Sharing()
-  return JGH.DB().mapShare ~= false
 end
 
 function Map.MinimapShowing()
@@ -50,7 +48,7 @@ local function Send(msg)
 end
 
 local function CanSend()
-  if not Map.Sharing() or not IsInGuild() then return false end
+  if not IsInGuild() then return false end
   if C_GuildInfo.CanSpeakInGuildChat and not C_GuildInfo.CanSpeakInGuildChat() then return false end
   local _, kind = IsInInstance()
   return kind ~= "pvp" and kind ~= "arena"
@@ -67,39 +65,100 @@ local function OwnPosition()
 end
 Map.OwnPosition = OwnPosition
 
-local function Learned()
-  local db = JGH.DB()
-  db.entrances = db.entrances or {}
-  return db.entrances
+local vec = CreateVector2D and CreateVector2D(0, 0)
+
+-- World yards, which work across zone borders: x points north, y points west.
+function Map.WorldPos(mapID, x, y)
+  if not vec or not C_Map.GetWorldPosFromMapPos then return end
+  vec:SetXY(x, y)
+  local ok, continent, pos = pcall(C_Map.GetWorldPosFromMapPos, mapID, vec)
+  if ok and continent and pos then return continent, pos.x, pos.y end
 end
 
--- The game's own dungeon entrances, indexed once by journal instance.
-local function JournalEntrance(instanceID)
+-- Only for instances the game has no entrance for.
+local function WalkedIn()
+  local db = JGH.DB()
+  db.walkedIn = db.walkedIn or {}
+  return db.walkedIn
+end
+
+local function AddDoor(map, key, door)
+  map[key] = map[key] or {}
+  table.insert(map[key], door)
+end
+
+-- The dungeon and raid entrances the game draws on its maps, by journal instance and by name.
+local function Doors()
+  if doors then return doors end
   local EJ = C_EncounterJournal
-  if not EJ or not EJ.GetInstanceForGameMap or not EJ.GetDungeonEntrancesForMap or not C_Map.GetMapChildrenInfo then return end
-  local ok, journalID = pcall(EJ.GetInstanceForGameMap, instanceID)
-  if not ok or not journalID or JGH.IsSecret(journalID) then return end
-  if not journal then
-    journal = {}
-    for _, root in ipairs({ 946, 947 }) do
-      for _, zone in ipairs(C_Map.GetMapChildrenInfo(root, Enum.UIMapType.Zone, true) or {}) do
-        local got, list = pcall(EJ.GetDungeonEntrancesForMap, zone.mapID)
-        for _, e in ipairs(got and type(list) == "table" and list or {}) do
-          local id, pos = e.journalInstanceID, e.position
-          if id and pos and not journal[id] then
-            local x, y = pos:GetXY()
-            journal[id] = { zone.mapID, x, y }
-          end
+  if not EJ or not EJ.GetDungeonEntrancesForMap or not C_Map.GetMapChildrenInfo then return end
+  if doorsTriedAt and GetTime() - doorsTriedAt < 60 then return end
+  local byID, byName = {}, {}
+  for _, root in ipairs({ 946, 947 }) do
+    for _, zone in ipairs(C_Map.GetMapChildrenInfo(root, Enum.UIMapType.Zone, true) or {}) do
+      local ok, list = pcall(EJ.GetDungeonEntrancesForMap, zone.mapID)
+      for _, e in ipairs(ok and type(list) == "table" and list or {}) do
+        if e.journalInstanceID and e.position then
+          local x, y = e.position:GetXY()
+          local door = { zone.mapID, x, y }
+          AddDoor(byID, e.journalInstanceID, door)
+          if type(e.name) == "string" and e.name ~= "" then AddDoor(byName, e.name:lower(), door) end
         end
       end
-      if next(journal) then break end
     end
+    if next(byID) then break end
   end
-  return journal[journalID]
+  -- Map data can lag behind login, so an empty result is tried again later.
+  if not next(byID) then
+    doorsTriedAt = GetTime()
+    return
+  end
+  doors = { byID = byID, byName = byName }
+  return doors
 end
 
-local function FindEntrance(instanceID)
-  local e = Learned()[instanceID] or JournalEntrance(instanceID)
+-- Falls back to the name, or the longest entrance name it starts with, for wings named after their dungeon.
+local function GameDoors(instanceID, name)
+  local d = Doors()
+  if not d then return end
+  local get = C_EncounterJournal.GetInstanceForGameMap
+  local ok, journalID = pcall(get or error, instanceID)
+  if ok and journalID and not JGH.IsSecret(journalID) and d.byID[journalID] then return d.byID[journalID] end
+  if type(name) ~= "string" or name == "" then return end
+  name = name:lower()
+  if d.byName[name] then return d.byName[name] end
+  local best
+  for doorName, list in pairs(d.byName) do
+    if name:sub(1, #doorName) == doorName and (not best or #doorName > #best) then best = doorName end
+  end
+  return best and d.byName[best]
+end
+
+-- Some instances have more than one entrance; take the one nearest to where they went in.
+local function Nearest(list, mapID, x, y)
+  if #list == 1 or not mapID then return list[1] end
+  local continent, wx, wy = Map.WorldPos(mapID, x, y)
+  local best, bestDist
+  for _, door in ipairs(list) do
+    local c, dx, dy = Map.WorldPos(door[1], door[2], door[3])
+    if continent and c == continent then
+      local dist = (dx - wx) ^ 2 + (dy - wy) ^ 2
+      if not bestDist or dist < bestDist then best, bestDist = door, dist end
+    end
+  end
+  return best or list[1]
+end
+
+-- The game's own entrance wins over where someone happened to stand when the loading screen started.
+local function Entrance(instanceID, name, mapID, x, y)
+  if mapID and mapID <= 0 then mapID = nil end
+  local list = GameDoors(instanceID, name)
+  if list then
+    local door = Nearest(list, mapID, x, y)
+    return door[1], door[2], door[3]
+  end
+  if mapID then return mapID, x, y end
+  local e = WalkedIn()[instanceID]
   if e then return e[1], e[2], e[3] end
 end
 
@@ -109,7 +168,7 @@ local function InstanceKind()
   if kind == "party" or kind == "raid" then return kind end
 end
 
--- Inside, members show at the entrance: where we walked in, else a known spot for that dungeon.
+-- Inside, members show at the instance's entrance.
 local function EnterWorld(_, isLogin, isReload)
   inside = nil
   wipe(last)
@@ -124,10 +183,9 @@ local function EnterWorld(_, isLogin, isReload)
   local mapID, x, y
   if walked then
     mapID, x, y = lastOut.mapID, lastOut.x, lastOut.y
-    Learned()[instanceID] = { mapID, x, y }
-  else
-    mapID, x, y = FindEntrance(instanceID)
+    WalkedIn()[instanceID] = { mapID, x, y }
   end
+  mapID, x, y = Entrance(instanceID, name, mapID, x, y)
   inside = { id = instanceID, name = name, raid = kind == "raid", mapID = mapID or 0, x = x or 0, y = y or 0 }
 end
 
@@ -163,7 +221,7 @@ local function PlayedNow()
 end
 
 -- Sends only after moving, plus a heartbeat so pins never expire while standing still.
-local function Broadcast()
+local function Broadcast(force)
   if not CanSend() then return end
   local mapID, x, y
   if inside then
@@ -178,7 +236,7 @@ local function Broadcast()
   local now = GetTime()
   local moved = last.mapID ~= mapID or last.taxi ~= taxi or last.inst ~= inst
     or math.abs(x - last.x) > MOVED or math.abs(y - last.y) > MOVED
-  if not moved and now - last.at < HEARTBEAT then return end
+  if not force and not moved and now - last.at < HEARTBEAT then return end
   local _, class = UnitClass("player")
   -- Extra fields go last, so older versions still read the first eight as a normal position.
   local fields = { PROTO, "P", mapID, math.floor(x * SCALE + 0.5), math.floor(y * SCALE + 0.5),
@@ -188,6 +246,20 @@ local function Broadcast()
   -- A blocked send retries next tick instead of waiting for the heartbeat.
   if not Send(table.concat(fields, "|")) then return end
   last.mapID, last.x, last.y, last.taxi, last.inst, last.at = mapID, x, y, taxi, inst, now
+end
+
+-- Members standing still only send every 30s, so someone logging in asks for every spot right away.
+local function Ask()
+  if IsInGuild() then Send(PROTO .. "|Q") end
+end
+
+local function Answer()
+  if answerTimer or (answerAt and GetTime() - answerAt < ANSWER_COOLDOWN) then return end
+  answerTimer = C_Timer.NewTimer(1 + math.random() * 3, function()
+    answerTimer = nil
+    answerAt = GetTime()
+    Broadcast(true)
+  end)
 end
 
 local function Remove(name)
@@ -200,11 +272,7 @@ end
 local function Store(name, source, mapID, x, y, level, class, taxi, instance, playedSecs)
   if not name or name == "" or name == JGH.PlayerName() then return end
   if instance then
-    if mapID and mapID > 0 then
-      Learned()[instance.id] = Learned()[instance.id] or { mapID, x, y }
-    else
-      mapID, x, y = FindEntrance(instance.id)
-    end
+    mapID, x, y = Entrance(instance.id, instance.name, mapID, x, y)
     -- No known entrance: drop the old outdoor pin rather than leave it misleading.
     if not mapID then return Remove(name) end
   end
@@ -281,9 +349,11 @@ local function OnMessage(_, prefix, text, channel, sender)
     return
   end
   local proto, kind, mapID, x, y, level, class, taxi, instID, instKind, instName, playedSecs = strsplit("|", text)
-  if proto ~= PROTO then return end
+  if proto ~= PROTO or name == JGH.PlayerName() then return end
   if kind == "X" then
     Remove(name)
+  elseif kind == "Q" then
+    Answer()
   elseif kind == "P" then
     x, y = tonumber(x), tonumber(y)
     if not x or not y then return end
@@ -292,13 +362,6 @@ local function OnMessage(_, prefix, text, channel, sender)
     Store(name, "zz", tonumber(mapID), x / SCALE, y / SCALE, tonumber(level), class, taxi == "1", instance,
       tonumber(playedSecs))
   end
-end
-
-function Map.SetSharing(on)
-  JGH.DB().mapShare = on
-  wipe(last)
-  -- Turning it off clears our pin for everyone right away.
-  if not on and IsInGuild() then Send(PROTO .. "|X") end
 end
 
 function Map.SetShowing(on)
@@ -312,6 +375,10 @@ function Map.SetMinimap(on)
 end
 
 function Map.Init()
+  -- Left over from when members could stop sharing.
+  JGH.DB().mapShare = nil
+  -- Guessed entrances from older versions, some of them wrong.
+  JGH.DB().entrances = nil
   if not C_Map or not C_Map.GetBestMapForUnit or not C_Map.GetPlayerMapPosition then return end
   if C_ChatInfo.RegisterAddonMessagePrefix then
     C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
@@ -342,7 +409,10 @@ JGH.RegisterEvent("TIME_PLAYED_MSG", function(_, total)
   -- Next frame, so this reply still skips the muted chat frames.
   C_Timer.After(0, Unmute)
 end)
+JGH.On("GuildReady", function() C_Timer.After(3, Ask) end)
+-- Also fires on rank changes, which shouldn't blank the map.
 JGH.RegisterEvent("PLAYER_GUILD_UPDATE", function()
+  if IsInGuild() or not next(Map.members) then return end
   wipe(Map.members)
   Changed()
 end)
